@@ -6,6 +6,7 @@ import { listEntries } from "../entries/store";
 import { existsSync, statSync } from "node:fs";
 import { logPath } from "../paths";
 import { green, red, dim, yellow } from "../format";
+import type { Command } from "commander";
 
 export function lsCommand(): void {
   const entries = listEntries();
@@ -44,4 +45,15 @@ function entryStatus(name: string): string {
   } catch {
     return dim("?");
   }
+}
+
+/** commander 注册：`svcctl ls`，alias `list` */
+export function register(program: Command): void {
+  program
+    .command("ls")
+    .alias("list")
+    .description("List all registered entries")
+    .action(() => {
+      lsCommand();
+    });
 }

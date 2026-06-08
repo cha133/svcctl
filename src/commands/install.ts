@@ -3,6 +3,7 @@
  */
 import { install as doInstall, uninstall as doUninstall, isInstalled } from "../install";
 import { success, error, info } from "../format";
+import type { Command } from "commander";
 
 export function installCommand(): void {
   if (isInstalled()) {
@@ -30,4 +31,20 @@ export function uninstallCommand(): void {
     error((e as Error).message);
     process.exit(1);
   }
+}
+
+/** commander 注册：`svcctl install` 和 `svcctl uninstall` */
+export function register(program: Command): void {
+  program
+    .command("install")
+    .description("Install the supervisor to auto-start on user login")
+    .action(() => {
+      installCommand();
+    });
+  program
+    .command("uninstall")
+    .description("Uninstall the supervisor")
+    .action(() => {
+      uninstallCommand();
+    });
 }

@@ -3,6 +3,7 @@
  */
 import { removeEntry, loadEntries } from "../entries/store";
 import { success, error, info } from "../format";
+import type { Command } from "commander";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
@@ -48,4 +49,16 @@ export async function removeCommand(name: string | undefined, opts: { all?: bool
     error((e as Error).message);
     process.exit(1);
   }
+}
+
+/** commander 注册：`svcctl remove [name] [--all]`，alias `rm` */
+export function register(program: Command): void {
+  program
+    .command("remove [name]")
+    .alias("rm")
+    .description("Remove a registered entry (use --all to remove everything)")
+    .option("-a, --all", "remove all entries")
+    .action(async (name: string | undefined, opts: { all?: boolean }) => {
+      await removeCommand(name, opts);
+    });
 }

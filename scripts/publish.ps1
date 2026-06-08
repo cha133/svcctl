@@ -8,11 +8,6 @@ Set-Location $PSScriptRoot\..
 Write-Host "[publish] building Rust supervisor..." -ForegroundColor Cyan
 & "$PSScriptRoot\build-launcher.ps1"
 
-Write-Host "[publish] creating *nix bin shim..." -ForegroundColor Cyan
-if (-not (Test-Path "bin/svcctl")) {
-    Copy-Item -Force bin/svcctl.js bin/svcctl
-}
-
 Write-Host "[publish] verifying tarball contents..." -ForegroundColor Cyan
 $dryRun = npm pack --dry-run 2>&1
 $dryRun | Select-String -Pattern "^\d+\.\d+(\.\d+)?(kB|MB)\s+(bin|src|README|LICENSE|package\.json)" | ForEach-Object { Write-Host "  $_" }

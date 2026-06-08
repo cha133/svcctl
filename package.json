@@ -1,6 +1,6 @@
 {
   "name": "svcctl",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "cross-init: cross-platform system startup supervisor (register any command as a user-level autostart item)",
   "type": "module",
   "bin": {
@@ -42,6 +42,7 @@
     "url": "git+https://github.com/cha133/svcctl.git"
   },
   "dependencies": {
+    "commander": "^15.0.0",
     "confbox": "^0.2.4",
     "picocolors": "^1.1.1"
   },

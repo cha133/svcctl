@@ -3,12 +3,12 @@
  */
 import { spawn, execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { windowsSupervisorPath, supervisorPidPath } from "../paths";
 import { success, error, info } from "../format";
 import { isInstalled } from "../install";
+import type { Command } from "commander";
 
 const START_TIMEOUT_MS = 5000;
 
@@ -105,13 +105,12 @@ async function waitForSupervisorPid(): Promise<void> {
   process.exit(1);
 }
 
-// 导出供 install 命令用
-export { defaultSvcctlCliPath };
-function defaultSvcctlCliPath(): string {
-  const url = import.meta.url;
-  const path = fileURLToPath(url);
-  if (path.includes(join("src", "index.ts")) || path.includes(join("src", "index.js"))) {
-    return join(dirname(path), "..", "bin", "svcctl.js");
-  }
-  return path;
+/** commander 注册：`svcctl start` */
+export function register(program: Command): void {
+  program
+    .command("start")
+    .description("Start the supervisor immediately (without rebooting)")
+    .action(async () => {
+      await startCommand();
+    });
 }

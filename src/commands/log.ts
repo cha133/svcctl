@@ -7,6 +7,7 @@ import { readFileSync, statSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { error, info } from "../format";
 import { green, red, yellow, dim } from "../format";
+import type { Command } from "commander";
 
 export interface LogOptions {
   follow?: boolean;
@@ -117,4 +118,16 @@ function listLogs(): void {
       `${n.padEnd(20)}  ${status.padEnd(10)}  ${p.padEnd(50)}  ${sizeKB.padEnd(9)}  ${mtime}`
     );
   }
+}
+
+/** commander 注册：`svcctl log [name] [-f] [-n N]` */
+export function register(program: Command): void {
+  program
+    .command("log [name]")
+    .description("Show or follow log for an entry (omit name to list all logs)")
+    .option("-f, --follow", "follow new output (tail -f style)")
+    .option("-n, --lines <n>", "show last N lines", (v: string) => parseInt(v, 10))
+    .action(async (name: string | undefined, opts: LogOptions) => {
+      await logCommand(name, opts);
+    });
 }

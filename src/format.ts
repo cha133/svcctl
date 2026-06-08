@@ -44,8 +44,3 @@ export function yellow(msg: string): string {
 export function bold(msg: string): string {
   return pc.bold(msg);
 }
-
-/** 灰显原始输出（log 转发时用） */
-export function dimRaw(msg: string): string {
-  return pc.gray(msg);
-}

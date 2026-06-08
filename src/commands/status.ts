@@ -7,6 +7,7 @@ import { isInstalled } from "../install";
 import { listEntries } from "../entries/store";
 import { logPath, supervisorPidPath, supervisorLogPath, svcctlDir } from "../paths";
 import { green, red, dim, error, info } from "../format";
+import type { Command } from "commander";
 
 const PID_ALIVE_TIMEOUT_SEC = 5;
 
@@ -97,4 +98,14 @@ function entryPid(name: string): number | null {
   } catch {
     return null;
   }
+}
+
+/** commander 注册：`svcctl status` */
+export function register(program: Command): void {
+  program
+    .command("status")
+    .description("Show installation / supervisor / per-entry status")
+    .action(() => {
+      statusCommand();
+    });
 }

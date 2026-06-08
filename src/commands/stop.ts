@@ -5,6 +5,7 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { supervisorPidPath, childrenJsonPath } from "../paths";
 import { success, error, info } from "../format";
+import type { Command } from "commander";
 
 const STOP_TIMEOUT_MS = 5000;
 
@@ -98,4 +99,14 @@ async function waitForSupervisorExit(): Promise<void> {
     await new Promise((r) => setTimeout(r, 100));
   }
   // 超时不强报错（supervisor 可能写得慢）
+}
+
+/** commander 注册：`svcctl stop` */
+export function register(program: Command): void {
+  program
+    .command("stop")
+    .description("Stop the supervisor")
+    .action(async () => {
+      await stopCommand();
+    });
 }

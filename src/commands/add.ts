@@ -4,6 +4,7 @@
 import { addEntry } from "../entries/store";
 import { slugify, validateSlug } from "../entries/name";
 import type { Entry } from "../entries/types";
+import type { Command } from "commander";
 import { existsSync } from "node:fs";
 import { installedFlagPath } from "../paths";
 import { install as doInstall } from "../install";
@@ -91,4 +92,28 @@ export async function addCommand(commandArgs: string[], opts: AddOptions): Promi
 
   // 6. 如果 supervisor 在跑，热重载会自动接管（fs.watch / mtime 合并到 reap）
   info(`entry persisted to ~/.svcctl/entries.toml. Supervisor will pick it up automatically.`);
+}
+
+/** commander 注册：`svcctl add <cmd...> [--name N] [--cwd D] [--env K=V]... [--no-install]` */
+export function register(program: Command): void {
+  program
+    .command("add <cmd...>")
+    .description("Add a command to be supervised on user login")
+    .option("-n, --name <name>", "explicit entry name (default: derived from command)")
+    .option("--cwd <cwd>", "working directory")
+    .option("-e, --env <kv...>", "env var KEY=VAL (can repeat)")
+    .option("--no-install", "skip auto-install on first add")
+    .action(
+      async (
+        cmd: string[],
+        opts: { name?: string; cwd?: string; env?: string[]; install?: boolean }
+      ) => {
+        await addCommand(cmd, {
+          name: opts.name,
+          cwd: opts.cwd,
+          env: opts.env,
+          noInstall: opts.install === false,
+        });
+      }
+    );
 }
