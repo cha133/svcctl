@@ -1,0 +1,8 @@
+node_modules/
+launcher/target/
+bin/svcctl-supervisor.exe
+bin/svcctl
+TODO.md
+*.log
+*.tgz
+.DS_Store

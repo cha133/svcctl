@@ -1,0 +1,52 @@
+{
+  "name": "svcctl",
+  "version": "0.2.0",
+  "description": "cross-init: cross-platform system startup supervisor (register any command as a user-level autostart item)",
+  "type": "module",
+  "bin": {
+    "svcctl": "bin/svcctl.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit",
+    "verify": "bunx tsc --noEmit && bun test",
+    "package": "pwsh -ExecutionPolicy Bypass -File scripts/package.ps1",
+    "release": "pwsh -ExecutionPolicy Bypass -File scripts/publish.ps1"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "keywords": [
+    "cli",
+    "autostart",
+    "launcher",
+    "supervisor",
+    "cross-platform",
+    "windows",
+    "macos",
+    "linux",
+    "system",
+    "service"
+  ],
+  "license": "MIT",
+  "author": "cha133",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cha133/svcctl.git"
+  },
+  "dependencies": {
+    "confbox": "^0.2.4",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}
