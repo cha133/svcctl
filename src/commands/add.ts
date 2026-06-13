@@ -3,6 +3,7 @@
  */
 import { addEntry } from "../entries/store";
 import { slugify, validateSlug } from "../entries/name";
+import { looksLikeShellTokenizationMistake } from "../entries/command";
 import type { Entry } from "../entries/types";
 import type { Command } from "commander";
 import { existsSync } from "node:fs";
@@ -25,6 +26,20 @@ export async function addCommand(commandArgs: string[], opts: AddOptions): Promi
 
   const command = commandArgs[0]!;
   const args = commandArgs.slice(1);
+
+  // 0. 拒明显是引号 tokenization 错误的 command（如 "cctra serve"）
+  //    commander 把每个 shell token 视作独立参数，引号是字面文本
+  if (looksLikeShellTokenizationMistake(command)) {
+    error(
+      `command "${command}" contains a space but no path separator — this is usually a shell tokenization mistake.`
+    );
+    error(
+      `commander treats each token as a separate argument; the quotes were literal text.`
+    );
+    error(`try (no quotes around the whole thing):`);
+    error(`  svcctl add ${command}`);
+    process.exit(1);
+  }
 
   // 1. 派生 name
   let name = opts.name ?? slugify(command, ...args);

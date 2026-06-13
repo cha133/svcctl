@@ -2,6 +2,7 @@
  * svcctl remove <name> [--all]
  */
 import { removeEntry, loadEntries } from "../entries/store";
+import { findEntry, EntryNotFoundError, EntryAmbiguousError } from "../entries/match";
 import { success, error, info } from "../format";
 import type { Command } from "commander";
 import { createInterface } from "node:readline/promises";
@@ -41,9 +42,21 @@ export async function removeCommand(name: string | undefined, opts: { all?: bool
     process.exit(1);
   }
 
+  // fuzzy 解析（给 ambiguous / not-found 一个友好提示）
+  let resolved: string;
   try {
-    removeEntry(name);
-    success(`removed "${name}"`);
+    resolved = findEntry(name).name;
+  } catch (e) {
+    if (e instanceof EntryNotFoundError || e instanceof EntryAmbiguousError) {
+      error(e.message);
+      process.exit(1);
+    }
+    throw e;
+  }
+
+  try {
+    removeEntry(resolved);
+    success(`removed "${resolved}"`);
     info(`supervisor will pick up the change automatically.`);
   } catch (e) {
     error((e as Error).message);

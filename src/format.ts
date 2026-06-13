@@ -44,3 +44,8 @@ export function yellow(msg: string): string {
 export function bold(msg: string): string {
   return pc.bold(msg);
 }
+
+/** 简单 k/v 排版：14 字符 key 列对齐 —— 给 status [name] 用 */
+export function kvRow(k: string, v: string): string {
+  return `${k.padEnd(14)}${v}`;
+}

@@ -3,9 +3,8 @@
  * 区别：svcctl status 查运行时状态，svcctl ls 查静态注册列表
  */
 import { listEntries } from "../entries/store";
-import { existsSync, statSync } from "node:fs";
-import { logPath } from "../paths";
-import { green, red, dim, yellow } from "../format";
+import { entryState } from "../entries/match";
+import { dim, green, red, yellow } from "../format";
 import type { Command } from "commander";
 
 export function lsCommand(): void {
@@ -25,25 +24,13 @@ export function lsCommand(): void {
   for (const e of entries) {
     const args = e.args.length === 0 ? dim("[]") : dim("[" + e.args.join(", ") + "]");
     const argsStr = args.length > 20 ? args.slice(0, 17) + "..." : args.padEnd(20);
-    const status = entryStatus(e.name);
+    const state = entryState(e.name);
+    const status =
+      state === "running" ? green("running") : state === "stopped" ? red("stopped") : yellow("never");
     const added = new Date(e.createdAt).toISOString().slice(0, 16).replace("T", " ");
     console.log(
       `${e.name.padEnd(nameW)}  ${e.command.padEnd(cmdW)}  ${argsStr}  ${status.padEnd(10)}  ${added}`
     );
-  }
-}
-
-/** 查 entry 状态：读 children.json（Windows），fallback 用 log mtime 60s 内 → running */
-function entryStatus(name: string): string {
-  const p = logPath(name);
-  if (!existsSync(p)) return yellow("never");
-  try {
-    const mtime = statSync(p).mtimeMs;
-    const ageSec = (Date.now() - mtime) / 1000;
-    if (ageSec < 60) return green("running");
-    return red("stopped");
-  } catch {
-    return dim("?");
   }
 }
 
