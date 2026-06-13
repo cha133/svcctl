@@ -47,6 +47,16 @@ export function installedFlagPath(): string {
   return join(svcctlDir(), "installed.flag");
 }
 
+/** ~/.svcctl/control.json 路径（CLI ↔ supervisor IPC） */
+export function controlJsonPath(): string {
+  return join(svcctlDir(), "control.json");
+}
+
+/** ~/.svcctl/supervisor.version 路径（记录已安装 supervisor 二进制对应的 CLI 版本） */
+export function supervisorVersionPath(): string {
+  return join(svcctlDir(), "supervisor.version");
+}
+
 /** Windows: ~/.svcctl/bin/SvcCtl.exe */
 export function windowsSupervisorPath(): string {
   return join(svcctlDir(), "bin", "SvcCtl.exe");

@@ -12,6 +12,8 @@ export interface Entry {
   env?: Record<string, string>;
   /** ISO-8601，add 时自动填 */
   createdAt: string;
+  /** 是否开机自启（默认 true）。false = 仅手动 start */
+  startup?: boolean;
   /** 可选 healthcheck URL（v1 status 暂不读，先留字段） */
   healthcheckUrl?: string;
 }

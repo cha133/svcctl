@@ -18,7 +18,7 @@ export function lsCommand(): void {
   const nameW = Math.max(4, ...entries.map((e) => e.name.length));
   const cmdW = Math.max(7, ...entries.map((e) => e.command.length));
   console.log(
-    `${"NAME".padEnd(nameW)}  ${"COMMAND".padEnd(cmdW)}  ${"ARGS".padEnd(20)}  ${"STATUS".padEnd(10)}  ADDED`
+    `${"NAME".padEnd(nameW)}  ${"COMMAND".padEnd(cmdW)}  ${"ARGS".padEnd(20)}  ${"STATUS".padEnd(10)}  ${"STARTUP".padEnd(7)}  ADDED`
   );
 
   for (const e of entries) {
@@ -27,9 +27,10 @@ export function lsCommand(): void {
     const state = entryState(e.name);
     const status =
       state === "running" ? green("running") : state === "stopped" ? red("stopped") : yellow("never");
+    const startup = e.startup === false ? yellow("manual") : dim("auto");
     const added = new Date(e.createdAt).toISOString().slice(0, 16).replace("T", " ");
     console.log(
-      `${e.name.padEnd(nameW)}  ${e.command.padEnd(cmdW)}  ${argsStr}  ${status.padEnd(10)}  ${added}`
+      `${e.name.padEnd(nameW)}  ${e.command.padEnd(cmdW)}  ${argsStr}  ${status.padEnd(10)}  ${startup.padEnd(7)}  ${added}`
     );
   }
 }

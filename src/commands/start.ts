@@ -1,26 +1,47 @@
 /**
- * svcctl start — 立即启动 supervisor（不等 OS 启动触发）
+ * svcctl start [name] — 启动 supervisor 或单个 entry
+ *
+ * 无参：启动 supervisor（现有行为，各平台 dispatch）
+ * 有参：通过 control.json 告诉 supervisor 启动指定 entry
  */
 import { spawn, execSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { windowsSupervisorPath, supervisorPidPath } from "../paths";
+import { findEntry, EntryNotFoundError, EntryAmbiguousError } from "../entries/match";
 import { success, error, info } from "../format";
 import { isInstalled } from "../install";
+import { isSupervisorRunning, sendControlCommand, waitForControlProcessed, ensureSupervisorUpToDate, warnSupervisorOutdated } from "./helpers";
 import type { Command } from "commander";
 
 const START_TIMEOUT_MS = 5000;
 
-export async function startCommand(): Promise<void> {
+export async function startCommand(name?: string): Promise<void> {
+  // 有 name → per-entry start
+  if (name) {
+    await startEntry(name);
+    return;
+  }
+
+  // 无 name → 启动 supervisor
   if (!isInstalled()) {
     error("svcctl is not installed. Run `svcctl add <command>` (auto-installs) or `svcctl install` first.");
     process.exit(1);
   }
 
-  // 如果 supervisor 已经在跑
-  if (supervisorAlreadyRunning()) {
-    info("supervisor is already running.");
+  // 启动前确保 supervisor 二进制是最新版
+  const status = ensureSupervisorUpToDate();
+  if (status === "upgraded") {
+    // 已自动升级，正常启动
+  }
+
+  if (isSupervisorRunning()) {
+    if (status === "needs-restart") {
+      warnSupervisorOutdated();
+    } else {
+      info("supervisor is already running.");
+    }
     return;
   }
 
@@ -36,22 +57,31 @@ export async function startCommand(): Promise<void> {
     process.exit(1);
   }
 
-  // 等待 supervisor 写 PID 文件
   await waitForSupervisorPid();
   success(`supervisor started.`);
 }
 
-function supervisorAlreadyRunning(): boolean {
-  const p = supervisorPidPath();
-  if (!existsSync(p)) return false;
-  try {
-    const pid = parseInt(readFileSync(p, "utf-8").trim(), 10);
-    if (!pid) return false;
-    // process.kill(pid, 0) 探测存活（不真发信号）
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
+async function startEntry(name: string): Promise<void> {
+  const resolved = findEntry(name);
+
+  if (!isSupervisorRunning()) {
+    error("supervisor is not running. Run `svcctl start` first.");
+    process.exit(1);
+  }
+
+  // supervisor 运行中但版本过旧 → 警告
+  const status = ensureSupervisorUpToDate();
+  if (status === "needs-restart") {
+    warnSupervisorOutdated();
+  }
+
+  sendControlCommand("start", resolved.name);
+  const ok = await waitForControlProcessed();
+  if (ok) {
+    success(`started "${resolved.name}"`);
+  } else {
+    error(`timed out waiting for supervisor to process start command`);
+    process.exit(1);
   }
 }
 
@@ -61,7 +91,6 @@ function startWindows(): void {
     error(`supervisor not found: ${sup}`);
     process.exit(1);
   }
-  // spawn detached，supervisor 自身会 hide console（#![windows_subsystem = "windows"]）
   const child = spawn(sup, [], {
     detached: true,
     stdio: "ignore",
@@ -94,7 +123,6 @@ async function waitForSupervisorPid(): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < START_TIMEOUT_MS) {
     if (existsSync(p)) {
-      // 简单 sleep 让 supervisor 真正初始化
       await new Promise((r) => setTimeout(r, 200));
       return;
     }
@@ -105,12 +133,20 @@ async function waitForSupervisorPid(): Promise<void> {
   process.exit(1);
 }
 
-/** commander 注册：`svcctl start` */
+/** commander 注册：`svcctl start [name]` */
 export function register(program: Command): void {
   program
-    .command("start")
-    .description("Start the supervisor immediately (without rebooting)")
-    .action(async () => {
-      await startCommand();
+    .command("start [name]")
+    .description("Start the supervisor, or a specific entry if name is given")
+    .action(async (name?: string) => {
+      try {
+        await startCommand(name);
+      } catch (e) {
+        if (e instanceof EntryNotFoundError || e instanceof EntryAmbiguousError) {
+          error(e.message);
+          process.exit(1);
+        }
+        throw e;
+      }
     });
 }

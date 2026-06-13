@@ -73,7 +73,7 @@ export function isInstalled(): boolean {
 }
 
 /** 推断 Windows supervisor 路径：向上递归找 bin/SvcCtl.exe */
-function defaultWindowsSupervisorPath(): string {
+export function defaultWindowsSupervisorPath(): string {
   // 从当前模块 url 向上递归找 bin/SvcCtl.exe —— 三个调用场景都支持:
   //   1. bun link (项目目录):           <project>/src/install/index.ts  → <project>/bin/SvcCtl.exe
   //   2. bunx svcctl install (临时):     <npm-cache>/svcctl/.../install/index.ts  → <npm-cache>/svcctl/.../bin/SvcCtl.exe

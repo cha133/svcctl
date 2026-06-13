@@ -1,15 +1,27 @@
 /**
- * svcctl stop — 停 supervisor（Windows 还要杀孤儿 children）
+ * svcctl stop [name] — 停止 supervisor 或单个 entry
+ *
+ * 无参：停止 supervisor（现有行为，各平台 dispatch）
+ * 有参：通过 control.json 告诉 supervisor 停止指定 entry
  */
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { supervisorPidPath, childrenJsonPath } from "../paths";
+import { findEntry, EntryNotFoundError, EntryAmbiguousError } from "../entries/match";
 import { success, error, info } from "../format";
+import { isSupervisorRunning, sendControlCommand, waitForControlProcessed, ensureSupervisorUpToDate, warnSupervisorOutdated } from "./helpers";
 import type { Command } from "commander";
 
 const STOP_TIMEOUT_MS = 5000;
 
-export async function stopCommand(): Promise<void> {
+export async function stopCommand(name?: string): Promise<void> {
+  // 有 name → per-entry stop
+  if (name) {
+    await stopEntry(name);
+    return;
+  }
+
+  // 无 name → 停止 supervisor
   const platform = process.platform;
   if (platform === "win32") {
     stopWindows();
@@ -22,9 +34,32 @@ export async function stopCommand(): Promise<void> {
     process.exit(1);
   }
 
-  // 等待 supervisor.pid 消失
   await waitForSupervisorExit();
   success("stopped.");
+}
+
+async function stopEntry(name: string): Promise<void> {
+  const resolved = findEntry(name);
+
+  if (!isSupervisorRunning()) {
+    error("supervisor is not running.");
+    process.exit(1);
+  }
+
+  // supervisor 运行中但版本过旧 → 警告
+  const status = ensureSupervisorUpToDate();
+  if (status === "needs-restart") {
+    warnSupervisorOutdated();
+  }
+
+  sendControlCommand("stop", resolved.name);
+  const ok = await waitForControlProcessed();
+  if (ok) {
+    success(`stopped "${resolved.name}"`);
+  } else {
+    error(`timed out waiting for supervisor to process stop command`);
+    process.exit(1);
+  }
 }
 
 function readSupervisorPid(): number | null {
@@ -45,7 +80,6 @@ function stopWindows(): void {
     return;
   }
 
-  // 1. 杀 children（从 children.json 读）
   const childrenFile = childrenJsonPath();
   if (existsSync(childrenFile)) {
     try {
@@ -61,7 +95,6 @@ function stopWindows(): void {
     } catch {}
   }
 
-  // 2. 杀 supervisor
   try {
     execSync(`taskkill /F /PID ${pid}`, { stdio: "pipe" });
     info(`killed supervisor (pid=${pid})`);
@@ -69,7 +102,6 @@ function stopWindows(): void {
     info(`supervisor (pid=${pid}) not killable: ${(e as Error).message}`);
   }
 
-  // 3. 删 pid 文件
   try {
     unlinkSync(supervisorPidPath());
   } catch {}
@@ -98,15 +130,22 @@ async function waitForSupervisorExit(): Promise<void> {
     if (!existsSync(supervisorPidPath())) return;
     await new Promise((r) => setTimeout(r, 100));
   }
-  // 超时不强报错（supervisor 可能写得慢）
 }
 
-/** commander 注册：`svcctl stop` */
+/** commander 注册：`svcctl stop [name]` */
 export function register(program: Command): void {
   program
-    .command("stop")
-    .description("Stop the supervisor")
-    .action(async () => {
-      await stopCommand();
+    .command("stop [name]")
+    .description("Stop the supervisor, or a specific entry if name is given")
+    .action(async (name?: string) => {
+      try {
+        await stopCommand(name);
+      } catch (e) {
+        if (e instanceof EntryNotFoundError || e instanceof EntryAmbiguousError) {
+          error(e.message);
+          process.exit(1);
+        }
+        throw e;
+      }
     });
 }

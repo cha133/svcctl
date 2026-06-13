@@ -4,11 +4,20 @@
 import { install as doInstall, uninstall as doUninstall, isInstalled } from "../install";
 import { success, error, info } from "../format";
 import { stopCommand } from "./stop";
+import { ensureSupervisorUpToDate } from "./helpers";
 import type { Command } from "commander";
 
 export function installCommand(): void {
   if (isInstalled()) {
-    info("svcctl is already installed.");
+    // 已安装：仍然确保 supervisor 二进制是最新版
+    const status = ensureSupervisorUpToDate();
+    if (status === "upgraded") {
+      success("supervisor binary updated.");
+    } else if (status === "needs-restart") {
+      info("supervisor is running an older version. Restart to upgrade: svcctl stop && svcctl start");
+    } else {
+      info("svcctl is already installed and up-to-date.");
+    }
     return;
   }
   try {

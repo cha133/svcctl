@@ -24,6 +24,7 @@ import {
 } from "../install";
 import { logPath, supervisorLogPath, supervisorPidPath, svcctlDir } from "../paths";
 import { bold, dim, error, green, info, kvRow, red, yellow } from "../format";
+import { ensureSupervisorUpToDate, warnSupervisorOutdated } from "./helpers";
 import type { Command } from "commander";
 
 export function statusCommand(name?: string): void {
@@ -46,6 +47,12 @@ function statusEntry(query: string): void {
     throw e;
   }
 
+  // supervisor 运行中但版本过旧 → 警告
+  const status = ensureSupervisorUpToDate();
+  if (status === "needs-restart") {
+    warnSupervisorOutdated();
+  }
+
   // 1) 头部 + 静态信息
   console.log(bold(`● ${entry.name}`));
   console.log(kvRow("command", entry.command));
@@ -57,6 +64,7 @@ function statusEntry(query: string): void {
     }
   }
   console.log(kvRow("created", entry.createdAt));
+  console.log(kvRow("startup", entry.startup === false ? yellow("manual") : dim("auto (boot)")));
   if (entry.healthcheckUrl) {
     console.log(kvRow("healthcheck", entry.healthcheckUrl));
   }

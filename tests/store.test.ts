@@ -98,6 +98,63 @@ describe("removeEntryAt", () => {
 });
 
 describe("file content", () => {
+  test("startup: false round-trips in TOML", () => {
+    const written = {
+      version: 1,
+      entries: [
+        {
+          name: "bar",
+          command: "bun",
+          args: ["run", "bar.js"],
+          createdAt: "2026-06-08T10:00:00.000Z",
+          startup: false,
+        },
+      ],
+    };
+    saveEntriesAt(written, tomlPath);
+    const read = loadEntriesAt(tomlPath);
+    expect(read.entries[0]?.startup).toBe(false);
+    const raw = readFileSync(tomlPath, "utf-8");
+    expect(raw).toContain("startup = false");
+  });
+
+  test("startup: omitted (default true) survives round-trip as undefined", () => {
+    const written = {
+      version: 1,
+      entries: [
+        {
+          name: "baz",
+          command: "node",
+          args: ["app.js"],
+          createdAt: "2026-06-08T10:00:00.000Z",
+        },
+      ],
+    };
+    saveEntriesAt(written, tomlPath);
+    const read = loadEntriesAt(tomlPath);
+    expect(read.entries[0]?.startup).toBeUndefined();
+    const raw = readFileSync(tomlPath, "utf-8");
+    expect(raw).not.toContain("startup");
+  });
+
+  test("startup: true round-trips", () => {
+    const written = {
+      version: 1,
+      entries: [
+        {
+          name: "qux",
+          command: "bun",
+          args: ["x"],
+          createdAt: "2026-06-08T10:00:00.000Z",
+          startup: true,
+        },
+      ],
+    };
+    saveEntriesAt(written, tomlPath);
+    const read = loadEntriesAt(tomlPath);
+    expect(read.entries[0]?.startup).toBe(true);
+  });
+
   test("written file is valid TOML", () => {
     const written = {
       version: 1,
