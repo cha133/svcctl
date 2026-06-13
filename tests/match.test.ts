@@ -211,40 +211,64 @@ describe("entryState", () => {
     utimesSync(f, past, past);
     expect(entryState("foo", f)).toBe("stopped");
   });
+
+  // 以下三个 case 用 tmpdir + path injection + fake name，不碰用户真实 ~/.svcctl/
+  // （回应"测试和 cctra 同名能不能进去"的顾虑 —— fake name 一眼假，路径全注入）
+  test("returns 'running' when children.json has a live PID (supervisor is authority)", () => {
+    const childrenPath = join(tmpDir, "children.json");
+    // test runner 自己的 PID，永远活着
+    writeFileSync(childrenPath, JSON.stringify({ "probe-alive": process.pid }));
+    // log 不存在也无所谓 —— PID probe 优先
+    expect(
+      entryState("probe-alive", "/nonexistent/probe-alive.log", childrenPath)
+    ).toBe("running");
+  });
+
+  test("returns 'stopped' when children.json has a dead PID", () => {
+    const childrenPath = join(tmpDir, "children.json");
+    // 超大假 PID：POSIX 和 Windows 都是无效 PID，process.kill(pid, 0) 立刻抛 ESRCH
+    writeFileSync(childrenPath, JSON.stringify({ "probe-dead": Number.MAX_SAFE_INTEGER }));
+    // log 是新鲜的（避免走 mtime fallback）
+    const logPath = join(tmpDir, "probe-dead.log");
+    writeFileSync(logPath, "x\n");
+    expect(entryState("probe-dead", logPath, childrenPath)).toBe("stopped");
+  });
+
+  test("PID in children.json wins over missing log file", () => {
+    const childrenPath = join(tmpDir, "children.json");
+    writeFileSync(childrenPath, JSON.stringify({ "probe-no-log": process.pid }));
+    // log 不存在 → 没 PID 时是 "never"；有 live PID 时是 "running"
+    expect(
+      entryState("probe-no-log", "/nonexistent/probe-no-log.log", childrenPath)
+    ).toBe("running");
+  });
 });
 
 describe("entryPid", () => {
-  test("returns null on non-windows platforms", () => {
-    // 默认在 linux/darwin 测试机上 process.platform !== 'win32'
-    if (process.platform === "win32") return; // skip on windows
-    expect(entryPid("foo", "/nonexistent.json")).toBeNull();
-  });
-
   test("returns null if children.json missing", () => {
-    if (process.platform === "win32") return; // skip on windows
     const f = join(tmpDir, "children.json");
     expect(existsSync(f)).toBe(false);
     expect(entryPid("foo", f)).toBeNull();
   });
 
-  test("reads PID from children.json (Windows contract)", () => {
+  test("reads PID from children.json (cross-platform — both Node + Rust supervisor write this)", () => {
     const f = join(tmpDir, "children.json");
     writeFileSync(f, JSON.stringify({ "cctra-serve": 12345, "bun-runner": 67890 }));
-    if (process.platform === "win32") {
-      expect(entryPid("cctra-serve", f)).toBe(12345);
-      expect(entryPid("missing", f)).toBeNull();
-    } else {
-      // 非 Windows 一律 null
-      expect(entryPid("cctra-serve", f)).toBeNull();
-    }
+    expect(entryPid("cctra-serve", f)).toBe(12345);
+    expect(entryPid("bun-runner", f)).toBe(67890);
+    expect(entryPid("missing", f)).toBeNull();
   });
 
   test("returns null on malformed JSON", () => {
     const f = join(tmpDir, "children.json");
     writeFileSync(f, "{not valid json");
-    if (process.platform === "win32") {
-      expect(entryPid("foo", f)).toBeNull();
-    }
+    expect(entryPid("foo", f)).toBeNull();
+  });
+
+  test("returns null when children.json is an object missing the entry", () => {
+    const f = join(tmpDir, "children.json");
+    writeFileSync(f, JSON.stringify({ "other-entry": 9999 }));
+    expect(entryPid("probe-missing", f)).toBeNull();
   });
 });
 

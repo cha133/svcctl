@@ -2,7 +2,8 @@
  * 名称解析 + 共享 entry 状态判定
  *
  * - `findEntry` / `suggestEntries` —— fuzzy 解析 CLI 输入
- * - `entryState` / `entryPid` —— 替代 ls.ts/status.ts/log.ts 三处重复的启发式
+ * - `entryState` / `entryPid` —— 替代 ls.ts/status.ts 两处重复的启发式
+ *   （log.ts 有自己的 ad-hoc 桶策略，不走这里）
  * - `tailLines` / `supervisorLogMentions` —— 给 status 用 log tail
  *
  * 所有 path 都可选（默认从 ~/.svcctl 取），测试可注入 tmp dir。
@@ -117,13 +118,29 @@ export function suggestEntries(
 }
 
 /**
- * 综合 PID + mtime 决定 entry 当前态
- * 替代 ls.ts:37-48 / status.ts:78-87 / log.ts:113-114 三处重复
+ * 决定 entry 当前态：PID liveness probe 优先，log mtime fallback
+ *
+ * - supervisor 是 entry 运行时态的权威（它 spawn / kill / reap，最清楚谁活着）
+ * - children.json 有 PID → 用 `process.kill(pid, 0)` 探活；活 = running，否则 stopped
+ * - children.json 没记录（从未启动 / supervisor 已退出并清理了文件）→ 退回 log mtime
+ *   60s 窗口；这层只是 supervisor 缺席时的 best-effort 提示，不要当真
+ *
+ * 替代 ls.ts:27 / status.ts:73 / status.ts:141 三处重复
  */
 export function entryState(
   name: string,
-  logPath: string = defaultLogPath(name)
+  logPath: string = defaultLogPath(name),
+  childrenPath: string = childrenJsonPath()
 ): EntryState {
+  const pid = entryPid(name, childrenPath);
+  if (pid !== null) {
+    try {
+      process.kill(pid, 0); // 信号 0 = 不真发信号，只检查 PID 是否存在（POSIX + Windows 同语义）
+      return "running";
+    } catch {
+      return "stopped"; // supervisor 记过这个 entry，但进程已死
+    }
+  }
   if (!existsSync(logPath)) return "never";
   try {
     const ageMs = Date.now() - statSync(logPath).mtimeMs;
@@ -133,12 +150,11 @@ export function entryState(
   }
 }
 
-/** Windows: 从 children.json 读 PID；其它平台 null（暂未实现） */
+/** 跨平台从 children.json 读 PID（Node supervisor + Rust supervisor 都跨平台写） */
 export function entryPid(
   name: string,
   childrenPath: string = childrenJsonPath()
 ): number | null {
-  if (process.platform !== "win32") return null;
   if (!existsSync(childrenPath)) return null;
   try {
     const data = JSON.parse(readFileSync(childrenPath, "utf-8")) as Record<string, number | null>;
