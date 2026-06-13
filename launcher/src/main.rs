@@ -3,7 +3,7 @@
 //   1. 隐藏自身 console（#![windows_subsystem = "windows"]）
 //   2. 写 ~/.svcctl/supervisor.pid
 //   3. 读 ~/.svcctl/entries.toml（用 toml crate）
-//   4. 对每条 entry 用 CREATE_NO_WINDOW + DETACHED_PROCESS 拉起，
+//   4. 对每条 entry 用 CREATE_NO_WINDOW 拉起，
 //      stdio 重定向到 ~/.svcctl/logs/<name>.log（append）
 //   5. 主循环：
 //      - try_wait 死掉的子进程，按 backoff 重启
@@ -25,7 +25,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-const DETACHED_PROCESS: u32 = 0x0000_0008;
 const REAP_INTERVAL_MS: u64 = 1000;
 const RESTART_BACKOFF_MS: u64 = 1000;
 
@@ -189,7 +188,7 @@ fn spawn_one(
         .stdin(Stdio::null())
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_err))
-        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
+        .creation_flags(CREATE_NO_WINDOW);
     if let Some(cwd) = &entry.cwd {
         cmd.current_dir(cwd);
     }
