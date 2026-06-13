@@ -1,12 +1,12 @@
 [package]
-name = "svcctl-supervisor"
-version = "0.1.0"
+name = "svcctl"
+version = "0.3.0"
 edition = "2021"
-description = "svcctl supervisor (Windows) - hidden-console multi-entry process manager"
+description = "svcctl (Windows) - hidden-console multi-entry process manager"
 license = "MIT"
 
 [[bin]]
-name = "svcctl-supervisor"
+name = "SvcCtl"
 path = "src/main.rs"
 
 [dependencies]
@@ -14,6 +14,10 @@ toml = "0.8"
 ctrlc = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# winres 只在 Windows 平台引入（macOS / Linux build.rs no-op）
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
 
 [profile.release]
 strip = true

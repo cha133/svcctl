@@ -1,4 +1,4 @@
-// svcctl-supervisor (Windows): 多 entry supervisor
+// svcctl (Windows): 多 entry supervisor
 // 职责：
 //   1. 隐藏自身 console（#![windows_subsystem = "windows"]）
 //   2. 写 ~/.svcctl/supervisor.pid
@@ -59,7 +59,7 @@ struct ChildRecord {
 
 fn main() {
     if let Err(e) = run() {
-        let _ = writeln!(std::io::stderr(), "[svcctl-supervisor] fatal: {}", e);
+        let _ = writeln!(std::io::stderr(), "[svcctl] fatal: {}", e);
         std::process::exit(1);
     }
 }

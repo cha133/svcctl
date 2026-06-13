@@ -17,6 +17,10 @@
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit",
     "verify": "bunx tsc --noEmit && bun test",
+    "build:icon": "pwsh -ExecutionPolicy Bypass -File scripts/build-icon.ps1",
+    "build:launcher": "pwsh -ExecutionPolicy Bypass -File scripts/build-launcher.ps1",
+    "build:all": "pwsh -ExecutionPolicy Bypass -File scripts/build-all.ps1",
+    "bump": "pwsh -ExecutionPolicy Bypass -File scripts/bump-version.ps1",
     "package": "pwsh -ExecutionPolicy Bypass -File scripts/package.ps1",
     "release": "pwsh -ExecutionPolicy Bypass -File scripts/publish.ps1"
   },

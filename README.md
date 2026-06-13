@@ -34,7 +34,46 @@ Adding or removing entries **hot-reloads** the supervisor — no restart needed:
 
 ```bash
 bun install
-bun run build:launcher  # Windows only — build svcctl-supervisor.exe
+bun run build:all        # Windows only — regenerate icon + build SvcCtl.exe
+```
+
+If you only need to rebuild without changing the icon:
+
+```bash
+bun run build:launcher   # cargo build only
+```
+
+## Changing the icon
+
+Source image lives in `launcher/assets/svcctl-source.png` (a backup of whatever you last fed to `build-icon.ps1`).
+
+```bash
+# Edit the source (1024x1024 RGBA PNG recommended; 球+halo should fill the canvas)
+# Then rebuild icon + exe in one shot:
+bun run build:icon -Source /path/to/your/new-orb.png
+bun run build:launcher
+# or just:
+bun run build:all -Source /path/to/your/new-orb.png
+```
+
+The icon shows up in Task Manager as `svcctl` (FileDescription) with the new orb glyph.
+
+## Bumping the version
+
+Versions live in two places that **must stay in sync**: `package.json` (npm CLI) and `launcher/Cargo.toml` (Rust supervisor). Both the VERSIONINFO on the .exe and the npm-published version come from these.
+
+```bash
+# Bump both + rebuild in one shot:
+bun run bump 0.4.0
+# or:
+pwsh scripts/bump-version.ps1 0.4.0
+```
+
+The script validates the semver, updates both files, and calls `build-all.ps1` to rebuild. After it finishes:
+
+```bash
+git diff package.json launcher/Cargo.toml
+git add -A && git commit -m "v0.4.0"
 ```
 
 ## License

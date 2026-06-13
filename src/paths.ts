@@ -47,9 +47,9 @@ export function installedFlagPath(): string {
   return join(svcctlDir(), "installed.flag");
 }
 
-/** Windows: ~/.svcctl/bin/svcctl-supervisor.exe */
+/** Windows: ~/.svcctl/bin/SvcCtl.exe */
 export function windowsSupervisorPath(): string {
-  return join(svcctlDir(), "bin", "svcctl-supervisor.exe");
+  return join(svcctlDir(), "bin", "SvcCtl.exe");
 }
 
 /** 确保目录存在 */

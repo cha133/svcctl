@@ -8,7 +8,7 @@ import { ensureSvcctlDir, windowsSupervisorPath, installedFlagPath, ensureDir } 
 import { info } from "../format";
 
 const REG_KEY = `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run`;
-const REG_NAME = "svcctl";
+const REG_NAME = "SvcCtl";
 
 /** install: copy supervisor + 写注册表 + 写 installed.flag */
 export function installWindows(bundledSupervisorPath: string): void {

@@ -1,5 +1,5 @@
 # Build the Windows Rust supervisor
-# 编译产物：bin/svcctl-supervisor.exe
+# 编译产物：bin/SvcCtl.exe
 
 $ErrorActionPreference = "Stop"
 
@@ -12,11 +12,23 @@ if ($LASTEXITCODE -ne 0) {
 }
 Pop-Location
 
-$src = Join-Path $PSScriptRoot "..\launcher\target\release\svcctl-supervisor.exe"
-$dst = Join-Path $PSScriptRoot "..\bin\svcctl-supervisor.exe"
+$src = Join-Path $PSScriptRoot "..\launcher\target\release\SvcCtl.exe"
+$dst = Join-Path $PSScriptRoot "..\bin\SvcCtl.exe"
 
 if (-not (Test-Path $src)) {
     throw "compiled binary not found: $src"
+}
+
+# 可选: rcedit 强制 set-icon (winres 默认 ID 1 但 rcedit 更稳. scoop install rcedit)
+if (Get-Command rcedit -ErrorAction SilentlyContinue) {
+    $icoPath = Join-Path $PSScriptRoot "..\launcher\assets\svcctl.ico"
+    if (Test-Path $icoPath) {
+        Write-Host "[build-launcher] rcedit: forcing icon to ID 1..." -ForegroundColor Cyan
+        rcedit $src --set-icon $icoPath
+        if ($LASTEXITCODE -ne 0) { throw "rcedit failed" }
+    }
+} else {
+    Write-Host "[build-launcher] (optional) install rcedit for guaranteed icon ID 1: scoop install rcedit" -ForegroundColor DarkGray
 }
 
 New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null

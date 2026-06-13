@@ -1,5 +1,5 @@
 # Build the Windows Rust supervisor + create npm tarball
-# 编译产物：bin/svcctl-supervisor.exe + *.tgz
+# 编译产物：bin/SvcCtl.exe + *.tgz
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot\..
