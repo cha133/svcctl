@@ -1,6 +1,6 @@
 [package]
 name = "svcctl"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2021"
 description = "svcctl (Windows) - hidden-console multi-entry process manager"
 license = "MIT"
@@ -14,6 +14,16 @@ toml = "0.8"
 ctrlc = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# v0.4.4: Job Object + AttachConsole + GenerateConsoleCtrlEvent —— 让 supervisor 真正成为进程树根
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+  "Win32_System_JobObjects",  # CreateJobObjectW / SetInformationJobObject / AssignProcessToJobObject
+  "Win32_Security",           # SECURITY_ATTRIBUTES (CreateJobObjectW 参数)
+  "Win32_System_Threading",    # OpenProcess
+  "Win32_System_Console",      # AttachConsole / FreeConsole / GenerateConsoleCtrlEvent / SetConsoleCtrlHandler
+  "Win32_Foundation",          # HANDLE / CloseHandle
+] }
 
 # winres 只在 Windows 平台引入（macOS / Linux build.rs no-op）
 [target.'cfg(windows)'.build-dependencies]

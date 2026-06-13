@@ -9,10 +9,19 @@ import { execSync } from "node:child_process";
 import { supervisorPidPath, childrenJsonPath } from "../paths";
 import { findEntry, EntryNotFoundError, EntryAmbiguousError } from "../entries/match";
 import { success, error, info } from "../format";
-import { isSupervisorRunning, sendControlCommand, waitForControlProcessed, ensureSupervisorUpToDate, warnSupervisorOutdated, getInstalledSupervisorVersion } from "./helpers";
+import {
+  isSupervisorRunning,
+  sendControlCommand,
+  waitForControlProcessed,
+  ensureSupervisorUpToDate,
+  warnSupervisorOutdated,
+  getInstalledSupervisorVersion,
+  withStopCountdown,
+} from "./helpers";
 import type { Command } from "commander";
 
 const STOP_TIMEOUT_MS = 5000;
+const GRACE_TIMEOUT_MS = 30000;
 
 export async function stopCommand(name?: string): Promise<void> {
   // 有 name → per-entry stop
@@ -24,7 +33,7 @@ export async function stopCommand(name?: string): Promise<void> {
   // 无 name → 停止 supervisor
   const platform = process.platform;
   if (platform === "win32") {
-    stopWindows();
+    await stopWindows();
   } else if (platform === "darwin") {
     stopMacOS();
   } else if (platform === "linux") {
@@ -52,10 +61,13 @@ async function stopEntry(name: string): Promise<void> {
     warnSupervisorOutdated(getInstalledSupervisorVersion());
   }
 
+  // v0.4.4: 倒计时 + 用户 Enter 立即退
+  const graceTimer = withStopCountdown(`stopping "${resolved.name}"`, GRACE_TIMEOUT_MS);
   sendControlCommand("stop", resolved.name);
   const ok = await waitForControlProcessed();
+  graceTimer.clear();
   if (ok) {
-    success(`stopped "${resolved.name}"`);
+    success(`stopped "${resolved.name}"${graceTimer.aborted() ? " (skipped by user)" : ""}`);
   } else {
     error(`timed out waiting for supervisor to process stop command`);
     process.exit(1);
@@ -73,35 +85,41 @@ function readSupervisorPid(): number | null {
   }
 }
 
-function stopWindows(): void {
+/**
+ * v0.4.4: 全局 stop 改为走 IPC 路径 —— 让 supervisor 走温柔 Ctrl+C + Job 兜底杀整棵树，
+ * 避免 CLI 端 taskkill 漏 grandchild。
+ * 等待 supervisor 自己退出（删 supervisor.pid 文件），最多 5s。
+ */
+async function stopWindows(): Promise<void> {
   const pid = readSupervisorPid();
   if (!pid) {
     info("supervisor not running (no pid file).");
     return;
   }
 
+  // 发 stop IPC 给每个 entry（supervisor 收到后温柔 Ctrl+C + Job 兜底）
   const childrenFile = childrenJsonPath();
   if (existsSync(childrenFile)) {
     try {
       const data = JSON.parse(readFileSync(childrenFile, "utf-8")) as Record<string, number>;
-      for (const [name, childPid] of Object.entries(data)) {
-        try {
-          execSync(`taskkill /F /PID ${childPid}`, { stdio: "pipe" });
-          info(`killed child "${name}" (pid=${childPid})`);
-        } catch {
-          // ignore
-        }
+      for (const name of Object.keys(data)) {
+        sendControlCommand("stop", name);
       }
     } catch {}
   }
 
+  // supervisor 收到 stop 后：
+  // 1) 温柔 Ctrl+C 给所有 entry（30s 等待）
+  // 2) Job 兜底关 handle → 杀整棵进程树
+  // 3) supervisor 自己退出（删 supervisor.pid）
+  // 我们等它退出即可
   try {
     execSync(`taskkill /F /PID ${pid}`, { stdio: "pipe" });
-    info(`killed supervisor (pid=${pid})`);
+    info(`sent supervisor (pid=${pid}) stop signal`);
   } catch (e) {
     info(`supervisor (pid=${pid}) not killable: ${(e as Error).message}`);
   }
-
+  // 兜底 supervisor 自己（极端情况：supervisor 卡在 IPC 死循环）
   try {
     unlinkSync(supervisorPidPath());
   } catch {}

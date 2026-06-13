@@ -24,11 +24,25 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[cfg(windows)]
+use std::ffi::c_void;
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
+
 use serde::{Deserialize, Serialize};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const REAP_INTERVAL_MS: u64 = 1000;
 const RESTART_BACKOFF_MS: u64 = 1000;
+
+// v0.4.4: Job Object 让 supervisor 真正成为进程树根 —— 关 Job handle 时整个 Job 内进程
+// （含 cctra 的 grandchild）自动被 OS TerminateProcess
+#[cfg(windows)]
+const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x00002000;
+
+// v0.4.4: 温柔 stop 等待时长。systemd=90s / supervisord=10s / docker=10s 折中选 30s
+// （给 DB 写盘 / HTTP 关连接 / 文件 sync 留时间）
+const GRACE_PERIOD_MS: u64 = 30000;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct Entry {
@@ -67,6 +81,11 @@ fn default_version() -> u32 { 1 }
 
 struct ChildRecord {
     child: Option<std::process::Child>,
+    /// v0.4.4: Windows Job handle —— 持有它不让 Job 关闭，OS 就不会回收 Job 成员进程。
+    /// 在 Phase B 的 `kill_tree_windows` 里调 CloseHandle 触发 OS 杀整棵树。
+    /// 字段值是 raw HANDLE（*mut c_void），不实现 Drop 自动关 —— 我们要 explicit 控制。
+    #[cfg(windows)]
+    job_handle: Option<*mut c_void>,
     last_spawn: Instant,
     entry: Entry,
 }
@@ -191,10 +210,8 @@ fn run() -> Result<(), String> {
 
     // shutdown
     for (name, mut rec) in state.drain() {
-        if let Some(child) = rec.child.as_mut() {
-            let _ = child.kill();
-            log_line(&sup_log_path, &format!("killed child '{}'", name));
-        }
+        kill_tree_windows(&mut rec, &sup_log_path);
+        log_line(&sup_log_path, &format!("killed child '{}'", name));
     }
     let _ = fs::remove_file(&pid_path);
     let _ = fs::remove_file(&children_json_path);
@@ -252,6 +269,11 @@ fn process_control_file(
         }
     };
 
+    // v0.4.4: 先删 control.json 再做事 —— kill_tree_windows 里 30s
+    // grace 等待不能阻塞 CLI 的 waitForControlProcessed（5s timeout）。
+    // 这符合 systemctl 语义：命令返回后 daemon 异步完成工作。
+    let _ = fs::remove_file(&control_path);
+
     match cmd.action.as_str() {
         "start" => {
             manual.insert(cmd.name.clone());
@@ -263,6 +285,8 @@ fn process_control_file(
                 _ => {
                     let mut rec = ChildRecord {
                         child: None,
+                        #[cfg(windows)]
+                        job_handle: None,
                         last_spawn: Instant::now(),
                         entry: entry.clone(),
                     };
@@ -278,11 +302,8 @@ fn process_control_file(
             paused.insert(cmd.name.clone());
             manual.remove(&cmd.name);
             if let Some(rec) = state.get_mut(&cmd.name) {
-                if let Some(ref mut child) = rec.child {
-                    let _ = child.kill();
-                    log_line(sup_log_path, &format!("manually stopped '{}'", cmd.name));
-                }
-                rec.child = None;
+                kill_tree_windows(rec, sup_log_path);
+                log_line(sup_log_path, &format!("manually stopped '{}'", cmd.name));
                 rec.last_spawn = Instant::now();
             } else {
                 log_line(sup_log_path, &format!("'{}' is not running", cmd.name));
@@ -293,14 +314,13 @@ fn process_control_file(
             manual.insert(cmd.name.clone());
             paused.remove(&cmd.name);
             if let Some(rec) = state.get_mut(&cmd.name) {
-                if let Some(ref mut child) = rec.child {
-                    let _ = child.kill();
-                }
-                rec.child = None;
+                kill_tree_windows(rec, sup_log_path);
                 rec.last_spawn = Instant::now();
             }
             let mut rec = ChildRecord {
                 child: None,
+                #[cfg(windows)]
+                job_handle: None,
                 last_spawn: Instant::now(),
                 entry: entry.clone(),
             };
@@ -315,8 +335,6 @@ fn process_control_file(
             log_line(sup_log_path, &format!("control: unknown action '{}'", cmd.action));
         }
     }
-
-    let _ = fs::remove_file(&control_path);
 }
 
 fn spawn_one(
@@ -348,14 +366,144 @@ fn spawn_one(
 
     let child = cmd.spawn().map_err(|e| format!("spawn: {}", e))?;
     let pid = child.id();
+
+    // v0.4.4: 把 child 加进 Job（KILL_ON_JOB_CLOSE）—— 任何时候关 Job handle 都会
+    // 让 OS 杀整个 Job 内进程树（含 child 的 grandchild，无需 supervisor 跟踪）
+    #[cfg(windows)]
+    {
+        let raw = child.as_raw_handle();
+        let job = unsafe { create_kill_on_close_job() };
+        match job {
+            Some(job) => {
+                let assigned = unsafe { assign_to_job(job, raw as *mut c_void) };
+                if assigned {
+                    rec.job_handle = Some(job);
+                    log_line(
+                        sup_log_path,
+                        &format!("spawned '{}' (pid={}, in job)", entry.name, pid),
+                    );
+                } else {
+                    log_line(
+                        sup_log_path,
+                        &format!("spawned '{}' (pid={}, FAILED to assign to job)", entry.name, pid),
+                    );
+                    unsafe { windows_sys::Win32::Foundation::CloseHandle(job); }
+                }
+            }
+            None => {
+                log_line(
+                    sup_log_path,
+                    &format!("spawned '{}' (pid={}, job create failed)", entry.name, pid),
+                );
+            }
+        }
+    }
+
     rec.child = Some(child);
     rec.last_spawn = Instant::now();
     rec.entry = entry.clone();
-    log_line(
-        sup_log_path,
-        &format!("spawned '{}' (pid={})", entry.name, pid),
-    );
     Ok(())
+}
+
+// v0.4.4: Job Object helpers —— 让 supervisor 真正成为进程树根
+#[cfg(windows)]
+unsafe fn create_kill_on_close_job() -> Option<*mut c_void> {
+    use windows_sys::Win32::System::JobObjects::{
+        CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    };
+    use windows_sys::Win32::Foundation::CloseHandle;
+
+    let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+    if job.is_null() {
+        return None;
+    }
+    let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+    info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    let ok = SetInformationJobObject(
+        job,
+        JobObjectExtendedLimitInformation,
+        &info as *const _ as *const _,
+        std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+    );
+    if ok == 0 {
+        CloseHandle(job);
+        return None;
+    }
+    Some(job)
+}
+
+#[cfg(windows)]
+unsafe fn assign_to_job(job: *mut c_void, process_handle: *mut c_void) -> bool {
+    use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+    AssignProcessToJobObject(job, process_handle) != 0
+}
+
+// v0.4.4: 温柔发 Ctrl+C 给指定 pid 的 console subsystem 进程。
+// supervisor 是 windows subsystem（无 console）必须先 AttachConsole 到目标进程，
+// 然后 SetConsoleCtrlHandler(None, TRUE) 屏蔽自己的 handler 避免自杀。
+// 返回 true 表示成功 attach + generate。
+#[cfg(windows)]
+unsafe fn send_ctrl_c(pid: u32) -> bool {
+    use windows_sys::Win32::System::Console::{
+        AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler, CTRL_C_EVENT,
+    };
+    let _ = FreeConsole();
+    if AttachConsole(pid) == 0 {
+        return false;
+    }
+    SetConsoleCtrlHandler(None, 1); // 1 = TRUE = 屏蔽自己的 handler
+    let ok = GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0) != 0;
+    // 必须 sleep 一会儿再 FreeConsole / 恢复 handler，否则会自杀
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    SetConsoleCtrlHandler(None, 0); // 0 = FALSE = 恢复
+    let _ = FreeConsole();
+    ok
+}
+
+/// v0.4.4: 温柔 + 兜底杀 entry 的整棵进程树。
+/// 1) 温柔 Ctrl+C 触发 SIGINT handler（30s 等待 child 自己退）
+/// 2) 兜底关 Job handle → OS 杀整个 Job 内所有进程（含 grandchild）
+/// 3) child.wait() reap 自己的 handle
+#[cfg(windows)]
+fn kill_tree_windows(rec: &mut ChildRecord, sup_log_path: &PathBuf) {
+    let pid = rec.child.as_ref().and_then(|c| Some(c.id()));
+
+    // 1) 温柔 Ctrl+C（仅当 child 还活着）
+    let sent_ctrlc = pid.map(|p| unsafe { send_ctrl_c(p) }).unwrap_or(false);
+    if sent_ctrlc {
+        log_line(sup_log_path, &format!("sent Ctrl+C to pid={:?}", pid));
+    }
+
+    // 2) 等 30s 看 child 自然退（轮询 try_wait，提早收工）
+    let start = std::time::Instant::now();
+    if let Some(child) = rec.child.as_mut() {
+        while start.elapsed() < std::time::Duration::from_millis(GRACE_PERIOD_MS) {
+            if let Ok(Some(status)) = child.try_wait() {
+                log_line(
+                    sup_log_path,
+                    &format!("child pid={:?} exited gracefully (status={:?})", pid, status),
+                );
+                rec.child = None;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+
+    // 3) 兜底：关 Job handle → OS 杀整棵进程树
+    if let Some(job) = rec.job_handle.take() {
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(job) };
+        log_line(
+            sup_log_path,
+            &format!("closed job for pid={:?} (force kill tree)", pid),
+        );
+    }
+
+    // 4) reap 自己的 handle
+    if let Some(mut child) = rec.child.take() {
+        let _ = child.wait();
+    }
 }
 
 fn reconcile(
@@ -380,10 +528,8 @@ fn reconcile(
         .collect();
     for n in to_remove {
         if let Some(mut rec) = state.remove(&n) {
-            if let Some(c) = rec.child.as_mut() {
-                let _ = c.kill();
-                log_line(sup_log_path, &format!("killed removed entry '{}'", n));
-            }
+            kill_tree_windows(&mut rec, sup_log_path);
+            log_line(sup_log_path, &format!("killed removed entry '{}'", n));
         }
         paused.remove(&n);
         manual.remove(&n);
@@ -398,6 +544,8 @@ fn reconcile(
                 // 新增 entry
                 let mut rec = ChildRecord {
                     child: None,
+                    #[cfg(windows)]
+                    job_handle: None,
                     last_spawn: Instant::now(),
                     entry: entry.clone(),
                 };
@@ -419,10 +567,7 @@ fn reconcile(
 
                 if changed {
                     // command/args/cwd/env 变了 → 重启
-                    if let Some(ref mut child) = rec.child {
-                        let _ = child.kill();
-                    }
-                    rec.child = None;
+                    kill_tree_windows(rec, sup_log_path);
                     rec.last_spawn = Instant::now();
                     rec.entry = entry.clone();
 
@@ -437,10 +582,7 @@ fn reconcile(
                     }
                 } else if was_startup && !is_startup && !manual.contains(&entry.name) {
                     // startup true→false：kill（除非被手动 start 过）
-                    if let Some(ref mut child) = rec.child {
-                        let _ = child.kill();
-                    }
-                    rec.child = None;
+                    kill_tree_windows(rec, sup_log_path);
                     rec.last_spawn = Instant::now();
                     rec.entry = entry.clone();
                     log_line(

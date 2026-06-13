@@ -41,6 +41,36 @@ const pausedSet = new Set<string>();
 /** 手动 start 的 entry —— 即使 startup:false 也保持运行 */
 const manualSet = new Set<string>();
 
+// v0.4.4: 温柔 stop 等待时长。systemd=90s / supervisord=10s / docker=10s 折中选 30s
+const GRACE_PERIOD_MS = 30_000;
+
+/** v0.4.4: 温柔 + 兜底杀 `proc` 的整个 process group (POSIX)：
+ *  1) kill(-pid, "SIGTERM") 信号整个 process group
+ *  2) 轮询 30s 等 proc 自己退
+ *  3) 兜底 kill(-pid, "SIGKILL") brutal
+ *  失败 fallback 单 pid。
+ */
+function killTree(proc: ChildProcess): Promise<void> {
+  return new Promise((resolve) => {
+    if (!proc.pid) { resolve(); return; }
+    const pgid = -proc.pid;
+    try { process.kill(pgid, "SIGTERM"); }
+    catch { try { proc.kill("SIGTERM"); } catch {} }
+    const start = Date.now();
+    const poll = setInterval(() => {
+      if (proc.exitCode !== null || proc.signalCode !== null) {
+        clearInterval(poll);
+        resolve();
+      } else if (Date.now() - start > GRACE_PERIOD_MS) {
+        clearInterval(poll);
+        try { process.kill(pgid, "SIGKILL"); }
+        catch { try { proc.kill("SIGKILL"); } catch {} }
+        resolve();
+      }
+    }, 100);
+  });
+}
+
 export async function runSupervisor(): Promise<void> {
   const dir = svcctlDir();
   const pidPath = supervisorPidPath();
@@ -68,9 +98,9 @@ export async function runSupervisor(): Promise<void> {
   };
   process.on("SIGTERM", () => cleanup("SIGTERM"));
   process.on("SIGINT", () => cleanup("SIGINT"));
-  process.on("SIGHUP", () => reconcile());
+  process.on("SIGHUP", () => { void reconcile(); });
 
-  reconcile();
+  void reconcile();
 
   const entriesPath = join(dir, "entries.toml");
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -79,7 +109,7 @@ export async function runSupervisor(): Promise<void> {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         logger.debug("entries.toml changed, reconciling");
-        reconcile();
+        void reconcile();
       }, 100);
     });
     logger.info(`watching ${entriesPath}`);
@@ -91,26 +121,37 @@ export async function runSupervisor(): Promise<void> {
   const reapIntervalMs = config.reapIntervalMs;
   const backoffMs = config.restartBackoffMs;
 
+  // v0.4.4: processControlFile / reconcile 现在 async，setInterval 用 mutex
+  // 避免上一个 tick 没处理完下一个 tick 又来（stop/restart 命令并发会乱序）
+  let processing = false;
   setInterval(() => {
-    // 1. 处理 CLI 通过 control.json 发来的命令
-    processControlFile();
+    if (processing) return;
+    processing = true;
+    (async () => {
+      try {
+        // 1. 处理 CLI 通过 control.json 发来的命令
+        await processControlFile();
 
-    // 2. reap 死掉的子进程 + 退避重启
-    const now = Date.now();
-    for (const [name, rec] of children) {
-      if (rec.proc && (rec.proc.exitCode !== null || rec.proc.signalCode !== null)) {
-        logger.warn(
-          `child "${name}" exited (code=${rec.proc.exitCode}, signal=${rec.proc.signalCode})`
-        );
-        rec.proc = null;
-        rec.lastSpawn = now;
-        writeChildrenJson();
+        // 2. reap 死掉的子进程 + 退避重启
+        const now = Date.now();
+        for (const [name, rec] of children) {
+          if (rec.proc && (rec.proc.exitCode !== null || rec.proc.signalCode !== null)) {
+            logger.warn(
+              `child "${name}" exited (code=${rec.proc.exitCode}, signal=${rec.proc.signalCode})`
+            );
+            rec.proc = null;
+            rec.lastSpawn = now;
+            writeChildrenJson();
+          }
+          // 跳过手动 stop 的 entry
+          if (!rec.proc && now - rec.lastSpawn >= backoffMs && !pausedSet.has(name)) {
+            spawnChild(name, rec.entry);
+          }
+        }
+      } finally {
+        processing = false;
       }
-      // 跳过手动 stop 的 entry
-      if (!rec.proc && now - rec.lastSpawn >= backoffMs && !pausedSet.has(name)) {
-        spawnChild(name, rec.entry);
-      }
-    }
+    })();
   }, reapIntervalMs).unref();
 
   // 长跑 —— 用一个永不 resolve 的 promise
@@ -118,7 +159,7 @@ export async function runSupervisor(): Promise<void> {
 }
 
 /** 处理 control.json（CLI → supervisor IPC） */
-function processControlFile(): void {
+async function processControlFile(): Promise<void> {
   const path = controlJsonPath();
   if (!existsSync(path)) return;
 
@@ -147,6 +188,10 @@ function processControlFile(): void {
     return;
   }
 
+  // v0.4.4: 先删 control.json 再做事 —— killTree 里 30s grace 等待
+  // 不能阻塞 CLI 的 waitForControlProcessed（5s timeout）。
+  try { unlinkSync(path); } catch {}
+
   switch (cmd.action) {
     case "start":
       manualSet.add(cmd.name);
@@ -173,10 +218,11 @@ function processControlFile(): void {
       {
         const rec = children.get(cmd.name);
         if (rec?.proc) {
-          try { rec.proc.kill("SIGTERM"); } catch {}
+          const proc = rec.proc;
           rec.proc = null;
           rec.lastSpawn = Date.now();
           writeChildrenJson();
+          await killTree(proc);
           logger.info(`manually stopped "${cmd.name}"`);
         } else {
           logger.info(`"${cmd.name}" is not running`);
@@ -190,9 +236,10 @@ function processControlFile(): void {
       {
         const rec = children.get(cmd.name);
         if (rec?.proc) {
-          try { rec.proc.kill("SIGTERM"); } catch {}
+          const proc = rec.proc;
           rec.proc = null;
           rec.lastSpawn = Date.now();
+          await killTree(proc);
         }
         spawnChild(cmd.name, entry);
         writeChildrenJson();
@@ -204,27 +251,31 @@ function processControlFile(): void {
       logger.warn(`control: unknown action "${cmd.action}"`);
   }
 
-  try { unlinkSync(path); } catch {}
+  // (control.json 已在 switch 前删除)
 }
 
-function reconcile(): void {
+async function reconcile(): Promise<void> {
   const file = loadEntries();
   const newEntries = file.entries;
   const newNames = new Set(newEntries.map((e) => e.name));
 
   // 1. kill 删除的 entry（同时清理 paused/manual set）
+  const toRemove: Array<[string, ChildRecord]> = [];
   for (const [name, rec] of children) {
     if (!newNames.has(name)) {
-      logger.info(`removing child "${name}" (no longer in entries.toml)`);
-      if (rec.proc) {
-        try {
-          rec.proc.kill("SIGTERM");
-        } catch {}
-      }
-      children.delete(name);
-      pausedSet.delete(name);
-      manualSet.delete(name);
+      toRemove.push([name, rec]);
     }
+  }
+  for (const [name, rec] of toRemove) {
+    logger.info(`removing child "${name}" (no longer in entries.toml)`);
+    if (rec.proc) {
+      const proc = rec.proc;
+      rec.proc = null;
+      await killTree(proc);
+    }
+    children.delete(name);
+    pausedSet.delete(name);
+    manualSet.delete(name);
   }
 
   // 2. spawn 新增 / 更新现有的 entry
@@ -249,9 +300,10 @@ function reconcile(): void {
         // command/args/cwd 变了 → 重启
         logger.info(`entry "${entry.name}" changed, restarting`);
         if (existing.proc) {
-          try { existing.proc.kill("SIGTERM"); } catch {}
+          const proc = existing.proc;
+          existing.proc = null;
+          await killTree(proc);
         }
-        existing.proc = null;
         existing.lastSpawn = Date.now();
         existing.entry = entry;
         if (shouldRun && !pausedSet.has(entry.name)) {
@@ -261,9 +313,10 @@ function reconcile(): void {
         // startup true→false：kill（除非被手动 start 过）
         logger.info(`entry "${entry.name}" startup: true→false, stopping`);
         if (existing.proc) {
-          try { existing.proc.kill("SIGTERM"); } catch {}
+          const proc = existing.proc;
           existing.proc = null;
           existing.lastSpawn = Date.now();
+          await killTree(proc);
         }
         existing.entry = entry;
       } else if (!wasStartup && isStartup && !pausedSet.has(entry.name)) {

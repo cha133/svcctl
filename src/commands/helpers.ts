@@ -2,6 +2,7 @@
  * 多个 command 共享的小帮手
  */
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { emitKeypressEvents } from "node:readline";
 import { supervisorPidPath, controlJsonPath, supervisorVersionPath } from "../paths";
 import { upgradeWindowsSupervisor, currentVersion } from "../install/windows";
 import { defaultWindowsSupervisorPath } from "../install";
@@ -84,4 +85,50 @@ export function warnSupervisorOutdated(installedVer: string | null): void {
     `Supervisor ${verHint} is running, current is v${current}. Restart to apply upgrade.\n` +
     `  svcctl stop && svcctl start`
   );
+}
+
+/**
+ * v0.4.4: 在 stderr 上显示倒计时（清行 + 重写），并允许用户按 Enter 立即跳过。
+ * `clear()` 终止显示并清行；返回的 `aborted()` 表示用户是否按 Enter 立即跳过。
+ * non-tty / pipe 时不挂 readline（避免 `svcctl stop cctra | grep ...` 卡住）。
+ */
+export function withStopCountdown(
+  label: string,
+  timeoutMs = 30000
+): { clear: () => void; aborted: () => boolean } {
+  const start = Date.now();
+  let stopped = false;
+  let userAborted = false;
+  const render = () => {
+    if (stopped) return;
+    const elapsed = Math.floor((Date.now() - start) / 1000);
+    const remain = Math.max(0, Math.ceil(timeoutMs / 1000) - elapsed);
+    process.stderr.write(`\r\x1b[K⏳ ${label} (${remain}s, press Enter to skip)`);
+  };
+  render();
+  const timer = setInterval(render, 250);
+  // 用户按 Enter 立即跳过 —— 仅在 TTY 时挂监听（pipe/重定向时不动 stdin）
+  let keypressHandler: ((ch: string, k: { name?: string }) => void) | null = null;
+  if (process.stdin.isTTY) {
+    emitKeypressEvents(process.stdin);
+    if (process.stdin.setRawMode) process.stdin.setRawMode(true);
+    keypressHandler = (_ch: string, k: { name?: string }) => {
+      if (k.name === "return" || k.name === "enter") userAborted = true;
+    };
+    process.stdin.on("keypress", keypressHandler);
+    process.stdin.resume();
+  }
+  return {
+    clear: () => {
+      stopped = true;
+      clearInterval(timer);
+      if (keypressHandler) {
+        process.stdin.off("keypress", keypressHandler);
+        if (process.stdin.setRawMode) process.stdin.setRawMode(false);
+        process.stdin.pause();
+      }
+      process.stderr.write(`\r\x1b[K`);
+    },
+    aborted: () => userAborted,
+  };
 }
