@@ -7,16 +7,16 @@
 import { findEntry, EntryNotFoundError, EntryAmbiguousError } from "../entries/match";
 import { loadEntries, saveEntries } from "../entries/store";
 import { success, error } from "../format";
-import { ensureSupervisorUpToDate, warnSupervisorOutdated } from "./helpers";
+import { ensureSupervisorUpToDate, warnSupervisorOutdated, getInstalledSupervisorVersion } from "./helpers";
 import type { Command } from "commander";
 
 export async function enableCommand(name: string): Promise<void> {
   const resolved = findEntry(name);
 
   // supervisor 运行中但版本过旧 → 警告（需要 supervisor 热加载 startup 变化）
-  const status = ensureSupervisorUpToDate();
+  const status = await ensureSupervisorUpToDate();
   if (status === "needs-restart") {
-    warnSupervisorOutdated();
+    warnSupervisorOutdated(getInstalledSupervisorVersion());
   }
 
   const file = loadEntries();

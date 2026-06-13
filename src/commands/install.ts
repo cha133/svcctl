@@ -4,17 +4,18 @@
 import { install as doInstall, uninstall as doUninstall, isInstalled } from "../install";
 import { success, error, info } from "../format";
 import { stopCommand } from "./stop";
-import { ensureSupervisorUpToDate } from "./helpers";
+import { ensureSupervisorUpToDate, getInstalledSupervisorVersion } from "./helpers";
 import type { Command } from "commander";
 
-export function installCommand(): void {
+export async function installCommand(): Promise<void> {
   if (isInstalled()) {
     // 已安装：仍然确保 supervisor 二进制是最新版
-    const status = ensureSupervisorUpToDate();
+    const status = await ensureSupervisorUpToDate();
     if (status === "upgraded") {
       success("supervisor binary updated.");
     } else if (status === "needs-restart") {
-      info("supervisor is running an older version. Restart to upgrade: svcctl stop && svcctl start");
+      const v = getInstalledSupervisorVersion();
+      info(`supervisor is running v${v ?? "an older version"}. Restart to upgrade: svcctl stop && svcctl start`);
     } else {
       info("svcctl is already installed and up-to-date.");
     }
@@ -50,8 +51,8 @@ export function register(program: Command): void {
   program
     .command("install")
     .description("Install the supervisor to auto-start on user login")
-    .action(() => {
-      installCommand();
+    .action(async () => {
+      await installCommand();
     });
   program
     .command("uninstall")

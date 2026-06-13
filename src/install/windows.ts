@@ -6,7 +6,7 @@ import { copyFileSync, existsSync, renameSync, writeFileSync, unlinkSync, readFi
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureSvcctlDir, windowsSupervisorPath, installedFlagPath, ensureDir, supervisorVersionPath, supervisorPidPath } from "../paths";
-import { info } from "../format";
+import { info, warn } from "../format";
 
 const REG_KEY = `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run`;
 const REG_NAME = "SvcCtl";
@@ -78,7 +78,9 @@ export function uninstallWindows(): void {
 
 /** isInstalled */
 export function isInstalledWindows(): boolean {
-  if (process.platform !== "win32") return false;
+  if (process.platform !== "win32") {
+    throw new Error("isInstalledWindows should only be called on Windows");
+  }
   try {
     const out = execSync(`reg query "${REG_KEY}" /v ${REG_NAME}`, { stdio: "pipe" }).toString();
     return out.includes(REG_NAME);
@@ -101,6 +103,13 @@ export function currentVersion(): string {
   }
 }
 
+/** 原子写文件：先写 .tmp 再 renameSync 覆盖目标。Windows 上 NTFS rename 原子替换。 */
+function atomicWriteSync(targetPath: string, content: string): void {
+  const tmp = targetPath + ".tmp";
+  writeFileSync(tmp, content, "utf-8");
+  renameSync(tmp, targetPath);
+}
+
 /**
  * 升级 Windows supervisor 二进制（如果版本不匹配）。
  *
@@ -108,8 +117,18 @@ export function currentVersion(): string {
  *   "up-to-date"     — 版本一致，无需操作
  *   "upgraded"       — 已复制新二进制 + 更新版本文件
  *   "needs-restart"  — supervisor 运行中，已用 NTFS rename 技巧准备好新二进制，需重启才生效
+ *
+ * 升级策略：
+ *   1. supervisor 没运行 → 直接 copyFileSync 覆盖 + 写版本戳
+ *   2. supervisor 运行中 → NTFS rename 技巧：
+ *      a) 把现有 .old 挪到 .old.stale（覆盖上次的；不删，Node unlink 在 Windows 上对被锁的 .exe 永远 EPERM）
+ *      b) 把 dest rename 到 .old
+ *      c) copyFileSync bundled → dest
+ *   3. 写版本戳（原子写 + 重试 3 次应对 AV 瞬时锁）
  */
-export function upgradeWindowsSupervisor(bundledPath: string): "up-to-date" | "upgraded" | "needs-restart" {
+export async function upgradeWindowsSupervisor(
+  bundledPath: string,
+): Promise<"up-to-date" | "upgraded" | "needs-restart"> {
   if (process.platform !== "win32") return "up-to-date";
   if (!existsSync(bundledPath)) return "up-to-date"; // bundled 不存在就不升级
 
@@ -123,7 +142,7 @@ export function upgradeWindowsSupervisor(bundledPath: string): "up-to-date" | "u
     try { installedVer = readFileSync(versionPath, "utf-8").trim(); } catch {}
   }
 
-  // 版本一致 → 无需操作
+  // 版本一致 + dest 存在 → 无需操作
   if (installedVer === ver && existsSync(dest)) return "up-to-date";
 
   // 确保目标目录存在
@@ -144,25 +163,93 @@ export function upgradeWindowsSupervisor(bundledPath: string): "up-to-date" | "u
 
   if (!supervisorRunning) {
     // supervisor 没运行，直接覆盖
-    copyFileSync(bundledPath, dest);
-    writeFileSync(versionPath, ver, "utf-8");
-    info(`supervisor binary updated to v${ver}`);
-    return "upgraded";
+    try {
+      copyFileSync(bundledPath, dest);
+      atomicWriteSync(versionPath, ver);
+      info(`supervisor binary updated to v${ver}`);
+      return "upgraded";
+    } catch (e) {
+      warn(`supervisor binary update failed: ${(e as Error).message}`);
+      return "needs-restart";
+    }
   }
 
   // supervisor 运行中：NTFS rename 技巧
-  // 运行中的 exe 不能覆盖，但可以重命名，然后 copy 新的到原位
+  const oldPath = dest + ".old";
+  const stalePath = dest + ".old.stale";
+
+  // 1) 把现有 .old 挪到 .old.stale（不删，unlink 在 Windows 上对被锁的 exe 永远 EPERM）。
+  //    .old.stale 可能因为是上次 rename 的产物也被锁（无法被覆盖），
+  //    所以失败时兜底用 .old.stale.<timestamp> 唯一名。
+  if (existsSync(oldPath)) {
+    const stashTargets: string[] = [stalePath];
+    const ts = Date.now();
+    stashTargets.push(`${stalePath}.${ts}`);
+
+    let stashed = false;
+    let lastErr: Error | null = null;
+    for (const target of stashTargets) {
+      try {
+        renameSync(oldPath, target);
+        stashed = true;
+        break;
+      } catch (e) {
+        lastErr = e as Error;
+      }
+    }
+    if (!stashed) {
+      warn(
+        `failed to stash previous supervisor binary ${oldPath}: ` +
+        `${lastErr?.message ?? "unknown error"}; upgrade deferred until next run.`,
+      );
+      return "needs-restart";
+    }
+  }
+
+  // 2) 把 dest rename 到 .old
   try {
-    const oldPath = dest + ".old";
-    // 清理上次可能遗留的 .old
-    try { unlinkSync(oldPath); } catch {}
     renameSync(dest, oldPath);
-    copyFileSync(bundledPath, dest);
-    writeFileSync(versionPath, ver, "utf-8");
-    info(`supervisor binary prepared for upgrade to v${ver} (restart to apply)`);
-    return "needs-restart";
-  } catch {
-    // rename 或 copy 失败（极端情况），无法升级
+  } catch (e) {
+    warn(
+      `failed to move running supervisor ${dest} → ${oldPath}: ` +
+      `${(e as Error).message}; upgrade deferred until next run.`,
+    );
     return "needs-restart";
   }
+
+  // 3) copyFileSync bundled → dest
+  try {
+    copyFileSync(bundledPath, dest);
+  } catch (e) {
+    warn(
+      `failed to copy new supervisor ${bundledPath} → ${dest}: ` +
+      `${(e as Error).message}; old binary is at ${oldPath}, upgrade will retry on next run.`,
+    );
+    return "needs-restart";
+  }
+
+  // 4) 原子写版本戳（write .tmp + renameSync）；重试 3 次应对 AV 瞬时锁
+  let stampErr: Error | null = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      atomicWriteSync(versionPath, ver);
+      stampErr = null;
+      break;
+    } catch (e) {
+      stampErr = e as Error;
+      if (attempt < 3) {
+        await new Promise<void>((r) => setTimeout(r, 100));
+      }
+    }
+  }
+  if (stampErr) {
+    warn(
+      `supervisor version stamp write failed after 3 attempts: ${stampErr.message}; ` +
+      `binary is replaced but stamp is stale — next call will retry.`,
+    );
+    return "needs-restart";
+  }
+
+  info(`supervisor binary prepared for upgrade to v${ver} (restart to apply)`);
+  return "needs-restart";
 }

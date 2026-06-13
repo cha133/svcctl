@@ -24,18 +24,18 @@ import {
 } from "../install";
 import { logPath, supervisorLogPath, supervisorPidPath, svcctlDir } from "../paths";
 import { bold, dim, error, green, info, kvRow, red, yellow } from "../format";
-import { ensureSupervisorUpToDate, warnSupervisorOutdated } from "./helpers";
+import { ensureSupervisorUpToDate, warnSupervisorOutdated, getInstalledSupervisorVersion } from "./helpers";
 import type { Command } from "commander";
 
-export function statusCommand(name?: string): void {
+export async function statusCommand(name?: string): Promise<void> {
   if (name) {
-    statusEntry(name);
+    await statusEntry(name);
   } else {
     statusGlobal();
   }
 }
 
-function statusEntry(query: string): void {
+async function statusEntry(query: string): Promise<void> {
   let entry;
   try {
     entry = findEntry(query);
@@ -48,9 +48,9 @@ function statusEntry(query: string): void {
   }
 
   // supervisor 运行中但版本过旧 → 警告
-  const status = ensureSupervisorUpToDate();
+  const status = await ensureSupervisorUpToDate();
   if (status === "needs-restart") {
-    warnSupervisorOutdated();
+    warnSupervisorOutdated(getInstalledSupervisorVersion());
   }
 
   // 1) 头部 + 静态信息
@@ -204,7 +204,7 @@ export function register(program: Command): void {
     .description(
       "Show status (omit name for global summary; pass name for per-entry detail)"
     )
-    .action((name?: string) => {
-      statusCommand(name);
+    .action(async (name?: string) => {
+      await statusCommand(name);
     });
 }

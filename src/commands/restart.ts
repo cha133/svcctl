@@ -6,7 +6,7 @@
  */
 import { findEntry, EntryNotFoundError, EntryAmbiguousError } from "../entries/match";
 import { success, error } from "../format";
-import { isSupervisorRunning, sendControlCommand, waitForControlProcessed, ensureSupervisorUpToDate, warnSupervisorOutdated } from "./helpers";
+import { isSupervisorRunning, sendControlCommand, waitForControlProcessed, ensureSupervisorUpToDate, warnSupervisorOutdated, getInstalledSupervisorVersion } from "./helpers";
 import type { Command } from "commander";
 
 export async function restartCommand(name: string): Promise<void> {
@@ -18,9 +18,9 @@ export async function restartCommand(name: string): Promise<void> {
   }
 
   // supervisor 运行中但版本过旧 → 警告
-  const status = ensureSupervisorUpToDate();
+  const status = await ensureSupervisorUpToDate();
   if (status === "needs-restart") {
-    warnSupervisorOutdated();
+    warnSupervisorOutdated(getInstalledSupervisorVersion());
   }
 
   sendControlCommand("restart", resolved.name);

@@ -12,7 +12,7 @@ import { windowsSupervisorPath, supervisorPidPath } from "../paths";
 import { findEntry, EntryNotFoundError, EntryAmbiguousError } from "../entries/match";
 import { success, error, info } from "../format";
 import { isInstalled } from "../install";
-import { isSupervisorRunning, sendControlCommand, waitForControlProcessed, ensureSupervisorUpToDate, warnSupervisorOutdated } from "./helpers";
+import { isSupervisorRunning, sendControlCommand, waitForControlProcessed, ensureSupervisorUpToDate, warnSupervisorOutdated, getInstalledSupervisorVersion } from "./helpers";
 import type { Command } from "commander";
 
 const START_TIMEOUT_MS = 5000;
@@ -31,14 +31,14 @@ export async function startCommand(name?: string): Promise<void> {
   }
 
   // 启动前确保 supervisor 二进制是最新版
-  const status = ensureSupervisorUpToDate();
+  const status = await ensureSupervisorUpToDate();
   if (status === "upgraded") {
     // 已自动升级，正常启动
   }
 
   if (isSupervisorRunning()) {
     if (status === "needs-restart") {
-      warnSupervisorOutdated();
+      warnSupervisorOutdated(getInstalledSupervisorVersion());
     } else {
       info("supervisor is already running.");
     }
@@ -70,9 +70,9 @@ async function startEntry(name: string): Promise<void> {
   }
 
   // supervisor 运行中但版本过旧 → 警告
-  const status = ensureSupervisorUpToDate();
+  const status = await ensureSupervisorUpToDate();
   if (status === "needs-restart") {
-    warnSupervisorOutdated();
+    warnSupervisorOutdated(getInstalledSupervisorVersion());
   }
 
   sendControlCommand("start", resolved.name);

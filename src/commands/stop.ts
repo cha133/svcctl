@@ -9,7 +9,7 @@ import { execSync } from "node:child_process";
 import { supervisorPidPath, childrenJsonPath } from "../paths";
 import { findEntry, EntryNotFoundError, EntryAmbiguousError } from "../entries/match";
 import { success, error, info } from "../format";
-import { isSupervisorRunning, sendControlCommand, waitForControlProcessed, ensureSupervisorUpToDate, warnSupervisorOutdated } from "./helpers";
+import { isSupervisorRunning, sendControlCommand, waitForControlProcessed, ensureSupervisorUpToDate, warnSupervisorOutdated, getInstalledSupervisorVersion } from "./helpers";
 import type { Command } from "commander";
 
 const STOP_TIMEOUT_MS = 5000;
@@ -47,9 +47,9 @@ async function stopEntry(name: string): Promise<void> {
   }
 
   // supervisor 运行中但版本过旧 → 警告
-  const status = ensureSupervisorUpToDate();
+  const status = await ensureSupervisorUpToDate();
   if (status === "needs-restart") {
-    warnSupervisorOutdated();
+    warnSupervisorOutdated(getInstalledSupervisorVersion());
   }
 
   sendControlCommand("stop", resolved.name);

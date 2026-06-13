@@ -2,7 +2,7 @@
  * 多个 command 共享的小帮手
  */
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
-import { supervisorPidPath, controlJsonPath } from "../paths";
+import { supervisorPidPath, controlJsonPath, supervisorVersionPath } from "../paths";
 import { upgradeWindowsSupervisor, currentVersion } from "../install/windows";
 import { defaultWindowsSupervisorPath } from "../install";
 import { warn } from "../format";
@@ -45,6 +45,21 @@ export async function waitForControlProcessed(timeoutMs = 5000): Promise<boolean
 export type SupervisorVersionStatus = "up-to-date" | "upgraded" | "needs-restart";
 
 /**
+ * 读取已安装的 supervisor 版本号（从 supervisor.version 文件）。
+ * 文件不存在/读失败/内容为空 → 返回 null。
+ */
+export function getInstalledSupervisorVersion(): string | null {
+  const p = supervisorVersionPath();
+  if (!existsSync(p)) return null;
+  try {
+    const v = readFileSync(p, "utf-8").trim();
+    return v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 确保 supervisor 二进制是最新版本。
  *
  * - macOS/Linux：Node.js supervisor 始终用最新代码，直接返回 "up-to-date"
@@ -55,14 +70,14 @@ export type SupervisorVersionStatus = "up-to-date" | "upgraded" | "needs-restart
  *   "upgraded"       — 已自动升级二进制
  *   "needs-restart"  — supervisor 运行中，新版已就位但需重启
  */
-export function ensureSupervisorUpToDate(): SupervisorVersionStatus {
+export async function ensureSupervisorUpToDate(): Promise<SupervisorVersionStatus> {
   if (process.platform !== "win32") return "up-to-date";
   const bundled = defaultWindowsSupervisorPath();
-  return upgradeWindowsSupervisor(bundled);
+  return await upgradeWindowsSupervisor(bundled);
 }
 
 /** supervisor 版本过旧时的标准警告消息 */
-export function warnSupervisorOutdated(installedVer?: string): void {
+export function warnSupervisorOutdated(installedVer: string | null): void {
   const current = currentVersion();
   const verHint = installedVer ? `v${installedVer}` : "an older version";
   warn(
