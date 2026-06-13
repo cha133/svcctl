@@ -103,13 +103,11 @@ describeWin("upgradeWindowsSupervisor", () => {
     expect(stamp).toBe(currentVersion());
   });
 
-  test("version mismatch + supervisor running + .old.stale 存在 → 走 rename 路径，dest 内容是新的", async () => {
-    const { upgradeWindowsSupervisor } = await import("../src/install/windows");
-    // 模拟上一次的升级残留：.old 和 .old.stale 都存在（都是 writeFileSync 写的，没锁）
+  test("version mismatch + supervisor running + .old 残留 → unlink .old，不创建 .old.stale", async () => {
+    const { upgradeWindowsSupervisor, currentVersion } = await import("../src/install/windows");
+    // 模拟上一次升级残留：只有 .old（v0.4.4 stop 正确杀进程树，不再需要 .old.stale）
     const oldPath = join(tempHome, ".svcctl", "bin", "SvcCtl.exe.old");
-    const stalePath = join(tempHome, ".svcctl", "bin", "SvcCtl.exe.old.stale");
     writeFileSync(oldPath, "previous-old-binary", "utf-8");
-    writeFileSync(stalePath, "previous-stale-binary", "utf-8");
     // 写一个旧版本号
     writeFileSync(
       join(tempHome, ".svcctl", "supervisor.version"),
@@ -120,6 +118,15 @@ describeWin("upgradeWindowsSupervisor", () => {
     const result = await upgradeWindowsSupervisor(bundledPath);
     expect(result).toBe("needs-restart");
 
+    // .old 现在存在（步骤 2 rename dest → .old 的结果），内容是旧的 bundled
+    // （升级前 dest 被 copy 成 bundled 的内容，所以新旧一样，但重要的是 .old 文件存在）
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(oldPath)).toBe(true);
+
+    // .old.stale 不会被创建
+    const stalePath = join(tempHome, ".svcctl", "bin", "SvcCtl.exe.old.stale");
+    expect(existsSync(stalePath)).toBe(false);
+
     // 验证 dest 是新的 bundled 内容
     const destContent = readFileSync(
       join(tempHome, ".svcctl", "bin", "SvcCtl.exe"),
@@ -129,7 +136,6 @@ describeWin("upgradeWindowsSupervisor", () => {
 
     // 验证版本戳更新了
     const stamp = readFileSync(join(tempHome, ".svcctl", "supervisor.version"), "utf-8");
-    const { currentVersion } = await import("../src/install/windows");
     expect(stamp).toBe(currentVersion());
   });
 });

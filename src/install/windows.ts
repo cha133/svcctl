@@ -121,7 +121,7 @@ function atomicWriteSync(targetPath: string, content: string): void {
  * 升级策略：
  *   1. supervisor 没运行 → 直接 copyFileSync 覆盖 + 写版本戳
  *   2. supervisor 运行中 → NTFS rename 技巧：
- *      a) 把现有 .old 挪到 .old.stale（覆盖上次的；不删，Node unlink 在 Windows 上对被锁的 .exe 永远 EPERM）
+ *      a) unlink 上次的 .old（v0.4.4 stop 正确杀进程树，不再有文件锁）
  *      b) 把 dest rename 到 .old
  *      c) copyFileSync bundled → dest
  *   3. 写版本戳（原子写 + 重试 3 次应对 AV 瞬时锁）
@@ -176,31 +176,15 @@ export async function upgradeWindowsSupervisor(
 
   // supervisor 运行中：NTFS rename 技巧
   const oldPath = dest + ".old";
-  const stalePath = dest + ".old.stale";
 
-  // 1) 把现有 .old 挪到 .old.stale（不删，unlink 在 Windows 上对被锁的 exe 永远 EPERM）。
-  //    .old.stale 可能因为是上次 rename 的产物也被锁（无法被覆盖），
-  //    所以失败时兜底用 .old.stale.<timestamp> 唯一名。
+  // 1) 删掉上次留下的 .old（v0.4.4 的 Job Object 保证进程树已杀光，文件不再被锁）
   if (existsSync(oldPath)) {
-    const stashTargets: string[] = [stalePath];
-    const ts = Date.now();
-    stashTargets.push(`${stalePath}.${ts}`);
-
-    let stashed = false;
-    let lastErr: Error | null = null;
-    for (const target of stashTargets) {
-      try {
-        renameSync(oldPath, target);
-        stashed = true;
-        break;
-      } catch (e) {
-        lastErr = e as Error;
-      }
-    }
-    if (!stashed) {
+    try {
+      unlinkSync(oldPath);
+    } catch (e) {
       warn(
-        `failed to stash previous supervisor binary ${oldPath}: ` +
-        `${lastErr?.message ?? "unknown error"}; upgrade deferred until next run.`,
+        `failed to remove old binary ${oldPath}: ${(e as Error).message}; ` +
+        `upgrade deferred until next run.`,
       );
       return "needs-restart";
     }
