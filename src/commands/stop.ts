@@ -12,7 +12,7 @@ import { success, error, info } from "../format";
 import {
   isSupervisorRunning,
   sendControlCommand,
-  waitForControlProcessed,
+  waitForEntryGone,
   ensureSupervisorUpToDate,
   warnSupervisorOutdated,
   getInstalledSupervisorVersion,
@@ -21,7 +21,8 @@ import {
 import type { Command } from "commander";
 
 const STOP_TIMEOUT_MS = 5000;
-const GRACE_TIMEOUT_MS = 30000;
+// v0.4.9: 30s → 5s。要改直接改 launcher/src/main.rs:GRACE_PERIOD_MS + 这里同步
+const GRACE_TIMEOUT_MS = 5000;
 
 export async function stopCommand(name?: string): Promise<void> {
   // 有 name → per-entry stop
@@ -62,14 +63,16 @@ async function stopEntry(name: string): Promise<void> {
   }
 
   // v0.4.4: 倒计时 + 用户 Enter 立即退
+  // v0.4.9: 等的是 children.json 丢 entry（=supervisor 真 kill 完），不再等
+  //         control.json 被删（IPC 来回 ~1s 不代表真杀完）
   const graceTimer = withStopCountdown(`stopping "${resolved.name}"`, GRACE_TIMEOUT_MS);
   sendControlCommand("stop", resolved.name);
-  const ok = await waitForControlProcessed();
+  const result = await waitForEntryGone(resolved.name, GRACE_TIMEOUT_MS);
   graceTimer.clear();
-  if (ok) {
+  if (result === "gone") {
     success(`stopped "${resolved.name}"${graceTimer.aborted() ? " (skipped by user)" : ""}`);
   } else {
-    error(`timed out waiting for supervisor to process stop command`);
+    error(`timed out after ${GRACE_TIMEOUT_MS / 1000}s waiting for "${resolved.name}" to stop — process may still be running`);
     process.exit(1);
   }
 }

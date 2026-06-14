@@ -1,6 +1,6 @@
 {
   "name": "svcctl",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "description": "cross-init: cross-platform system startup supervisor (register any command as a user-level autostart item)",
   "type": "module",
   "bin": {

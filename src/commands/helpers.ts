@@ -3,7 +3,8 @@
  */
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { emitKeypressEvents } from "node:readline";
-import { supervisorPidPath, controlJsonPath, supervisorVersionPath } from "../paths";
+import { supervisorPidPath, controlJsonPath, childrenJsonPath, supervisorVersionPath } from "../paths";
+import { entryPid } from "../entries/match";
 import { upgradeWindowsSupervisor, currentVersion } from "../install/windows";
 import { defaultWindowsSupervisorPath } from "../install";
 import { warn } from "../format";
@@ -41,6 +42,30 @@ export async function waitForControlProcessed(timeoutMs = 5000): Promise<boolean
     await new Promise((r) => setTimeout(r, 100));
   }
   return false;
+}
+
+/**
+ * v0.4.9: 等 entry 从 children.json 消失 = supervisor 真删完 PID
+ * （kill_tree_windows 跑完 + write_children_json 写完的间接信号）。
+ * 之前 stop 走 waitForControlProcessed，只等 control.json 被删（IPC 来回 ~1s），
+ * 但 grace 期间 children.json 是冻结的，CLI 提前 return 会让用户立刻 ls
+ * 看到 "running" 误以为 stop 失败。现在等 children.json 真正反映 supervisor
+ * 视角，CLI 跟 supervisor 同步。
+ *
+ * 边界 case：children.json 初始就没这个 entry（entry 从未跑过 / 已 stopped）→
+ * 立即返回 "gone"（idempotent：再 stop 一次是 no-op，但用户视角仍合理）。
+ */
+export async function waitForEntryGone(
+  name: string,
+  timeoutMs: number,
+  childrenPath: string = childrenJsonPath()
+): Promise<"gone" | "timeout"> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (entryPid(name, childrenPath) === null) return "gone";
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return "timeout";
 }
 
 export type SupervisorVersionStatus = "up-to-date" | "upgraded" | "needs-restart";

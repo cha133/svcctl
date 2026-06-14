@@ -42,9 +42,10 @@ const RESTART_BACKOFF_MS: u64 = 1000;
 #[cfg(windows)]
 const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x00002000;
 
-// v0.4.4: 温柔 stop 等待时长。systemd=90s / supervisord=10s / docker=10s 折中选 30s
-// （给 DB 写盘 / HTTP 关连接 / 文件 sync 留时间）
-const GRACE_PERIOD_MS: u64 = 30000;
+// v0.4.4: 温柔 stop 等待时长。systemd=90s / supervisord=10s / docker=10s 折中
+// v0.4.9: 30s → 5s。30s 对 simple dev tools 严重过度；Job Object 兜底强杀 100% 杀得动
+// 5s 还没退就视为不响应 SIGINT（如 cctra case），走 Job close。要改直接改 const
+const GRACE_PERIOD_MS: u64 = 5000;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct Entry {
