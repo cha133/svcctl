@@ -5,7 +5,7 @@ bin/svcctl
 # 源图 + 母图备份（不入仓）
 icon-image-resized.png
 launcher/assets/svcctl-source.png
-TODO.md
+BOARD.md
 *.log
 *.tgz
 .DS_Store
