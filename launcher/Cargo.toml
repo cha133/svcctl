@@ -1,6 +1,6 @@
 [package]
 name = "svcctl"
-version = "0.4.7"
+version = "0.4.8"
 edition = "2021"
 description = "svcctl (Windows) - hidden-console multi-entry process supervisor"
 license = "MIT"

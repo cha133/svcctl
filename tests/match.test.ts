@@ -196,20 +196,25 @@ describe("entryState", () => {
     expect(entryState("foo", "/nonexistent/path.log")).toBe("never");
   });
 
-  test("returns 'running' if mtime < threshold ago", () => {
-    const f = join(tmpDir, "fresh.log");
-    writeFileSync(f, "hi\n");
-    // mtime 默认是 now
-    expect(entryState("foo", f)).toBe("running");
+  test("returns 'stopped' when children.json has no entry, even if log mtime is fresh (v0.4.8 regression)", () => {
+    // 复现 v0.4.8 修的 bug：孤儿进程仍在写 log → mtime 新鲜；
+    // 之前会走 mtime fallback 误报 running；现在 supervisor 没跟踪就是 stopped。
+    const logPath = join(tmpDir, "orphan-fresh.log");
+    writeFileSync(logPath, "still alive\n");
+    const childrenPath = join(tmpDir, "children.json");
+    writeFileSync(childrenPath, "{}"); // supervisor 不跟踪任何 entry
+    expect(entryState("orphan", logPath, childrenPath)).toBe("stopped");
   });
 
-  test("returns 'stopped' if mtime > threshold ago", () => {
+  test("returns 'stopped' if log file exists and children.json has no entry", () => {
+    // mtime 多老都不重要 —— supervisor 没跟踪就是 stopped（不再用 mtime 启发式）。
     const f = join(tmpDir, "stale.log");
     writeFileSync(f, "old\n");
-    // 改成 RUNNING_THRESHOLD_MS + 1ms 之前
     const past = new Date(Date.now() - RUNNING_THRESHOLD_MS - 1000);
     utimesSync(f, past, past);
-    expect(entryState("foo", f)).toBe("stopped");
+    const childrenPath = join(tmpDir, "children.json");
+    writeFileSync(childrenPath, "{}");
+    expect(entryState("foo", f, childrenPath)).toBe("stopped");
   });
 
   // 以下三个 case 用 tmpdir + path injection + fake name，不碰用户真实 ~/.svcctl/

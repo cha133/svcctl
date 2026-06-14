@@ -8,7 +8,7 @@
  *
  * 所有 path 都可选（默认从 ~/.svcctl 取），测试可注入 tmp dir。
  */
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
   childrenJsonPath,
   entriesTomlPath,
@@ -18,7 +18,7 @@ import {
 import { loadEntriesAt } from "./store";
 import type { Entry } from "./types";
 
-/** 进程"还活着"的 mtime 窗口（60s） */
+/** v0.4.2 引入的 60s 窗口历史值 —— entryState v0.4.8 起不再使用；保留以备 v1.1+ 复用 */
 export const RUNNING_THRESHOLD_MS = 60_000;
 
 /** status [name] tail 该 entry log 的行数 */
@@ -118,12 +118,14 @@ export function suggestEntries(
 }
 
 /**
- * 决定 entry 当前态：PID liveness probe 优先，log mtime fallback
+ * 决定 entry 当前态：supervisor 是唯一权威
  *
- * - supervisor 是 entry 运行时态的权威（它 spawn / kill / reap，最清楚谁活着）
- * - children.json 有 PID → 用 `process.kill(pid, 0)` 探活；活 = running，否则 stopped
- * - children.json 没记录（从未启动 / supervisor 已退出并清理了文件）→ 退回 log mtime
- *   60s 窗口；这层只是 supervisor 缺席时的 best-effort 提示，不要当真
+ * - children.json 有 PID → `process.kill(pid, 0)` 探活；活 = running，否则 stopped
+ * - children.json 没记录 → supervisor 没跟踪这个 entry（从未启动 / 已退出清理 /
+ *   孤儿进程残留 —— supervisor 不知道这进程的 PID）。仅用 log 是否存在区分
+ *   never vs stopped；**不再用 log mtime 判 running**
+ *   （v0.4.2 那条启发式假设 "log 新鲜 = 进程活跃"，但孤儿进程可能仍在写 log，
+ *    让 mtime 永久新鲜而 supervisor 完全不知情 —— v0.4.8 删掉这条误报路径）
  *
  * 替代 ls.ts:27 / status.ts:73 / status.ts:141 三处重复
  */
@@ -141,13 +143,8 @@ export function entryState(
       return "stopped"; // supervisor 记过这个 entry，但进程已死
     }
   }
-  if (!existsSync(logPath)) return "never";
-  try {
-    const ageMs = Date.now() - statSync(logPath).mtimeMs;
-    return ageMs < RUNNING_THRESHOLD_MS ? "running" : "stopped";
-  } catch {
-    return "never";
-  }
+  // supervisor 没跟踪 → 仅用 log 是否存在区分 never / stopped。
+  return existsSync(logPath) ? "stopped" : "never";
 }
 
 /** 跨平台从 children.json 读 PID（Node supervisor + Rust supervisor 都跨平台写） */
