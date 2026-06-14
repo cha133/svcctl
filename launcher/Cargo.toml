@@ -1,6 +1,6 @@
 [package]
 name = "svcctl"
-version = "0.4.5"
+version = "0.4.6"
 edition = "2021"
 description = "svcctl (Windows) - hidden-console multi-entry process supervisor"
 license = "MIT"
@@ -14,6 +14,8 @@ toml = "0.8"
 ctrlc = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# v0.4.6: ISO 8601 时间戳，跟 JS `new Date().toISOString()` 输出一致
+chrono = "0.4"
 
 # v0.4.4: Job Object + AttachConsole + GenerateConsoleCtrlEvent —— 让 supervisor 真正成为进程树根
 [target.'cfg(windows)'.dependencies]

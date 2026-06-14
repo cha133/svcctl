@@ -22,7 +22,9 @@ use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{channel, RecvTimeoutError};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
+
+use chrono::{SecondsFormat, Utc};
 
 #[cfg(windows)]
 use std::ffi::c_void;
@@ -658,11 +660,9 @@ fn file_mtime_ms(path: &PathBuf) -> u64 {
 }
 
 fn log_line(path: &PathBuf, msg: &str) {
-    // 简化时间戳：unix ms（避免引 chrono 多一个 crate）
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
+    // v0.4.6: ISO 8601 时间戳（`2026-06-14T12:54:01.706Z`），跟 JS `toISOString()` 一致
+    // → `svcctl status` 在三平台输出格式统一
+    let ts = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
     let line = format!("[{}] [INFO] {}\n", ts, msg);
     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
         let _ = f.write_all(line.as_bytes());
