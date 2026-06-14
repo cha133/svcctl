@@ -58,6 +58,10 @@ struct Entry {
     env: HashMap<String, String>,
     #[serde(default = "default_true")]
     startup: bool,
+    /// v0.4.7: 死了是否 opt-in 自动重启。默认 false —— 大部分程序内部都有全局 catch 不容易死，
+    /// 不需要 supervisor 兜底；想要兜底就在 entries.toml 加 `restart = true`。
+    #[serde(default)]
+    restart: bool,
 }
 
 fn default_true() -> bool { true }
@@ -89,6 +93,10 @@ struct ChildRecord {
     #[cfg(windows)]
     job_handle: Option<*mut c_void>,
     last_spawn: Instant,
+    /// v0.4.7: 是否"期望运行"（reconcile 决定的意图）
+    /// 区分 reconcile 故意没 spawn 的 entry（want_run=false, reap 块不要重启）
+    /// 和 spawn 后死了的 entry（want_run=true, reap 块按 restart 策略重启）。
+    want_run: bool,
     entry: Entry,
 }
 
@@ -186,7 +194,9 @@ fn run() -> Result<(), String> {
                     }
                 }
             }
-            if rec.child.is_none()
+            if rec.want_run                                                // v0.4.7: 区分 reconcile 故意没 spawn
+                && rec.entry.restart                                        // v0.4.7: opt-in 才重启
+                && rec.child.is_none()
                 && now.duration_since(rec.last_spawn).as_millis() as u64 >= RESTART_BACKOFF_MS
                 && !paused.contains(name)
             {
@@ -290,6 +300,7 @@ fn process_control_file(
                         #[cfg(windows)]
                         job_handle: None,
                         last_spawn: Instant::now(),
+                        want_run: true, // v0.4.7: "start" 一定期望运行
                         entry: entry.clone(),
                     };
                     if let Err(e) = spawn_one(&entry, svcctl_dir, &mut rec, sup_log_path) {
@@ -307,6 +318,7 @@ fn process_control_file(
                 kill_tree_windows(rec, sup_log_path);
                 log_line(sup_log_path, &format!("manually stopped '{}'", cmd.name));
                 rec.last_spawn = Instant::now();
+                rec.want_run = false; // v0.4.7: 手动 stop 后不期望再跑（与 paused 双重保险）
             } else {
                 log_line(sup_log_path, &format!("'{}' is not running", cmd.name));
             }
@@ -324,6 +336,7 @@ fn process_control_file(
                 #[cfg(windows)]
                 job_handle: None,
                 last_spawn: Instant::now(),
+                want_run: true, // v0.4.7: "restart" 一定期望运行
                 entry: entry.clone(),
             };
             if let Err(e) = spawn_one(&entry, svcctl_dir, &mut rec, sup_log_path) {
@@ -544,11 +557,14 @@ fn reconcile(
         match state.get_mut(&entry.name) {
             None => {
                 // 新增 entry
+                // v0.4.7: want_run 表达"是否期望运行"——manual entry 故意不 spawn 时
+                // 也设为 false，reap 块就不会把 rec 当成"死了要重启"误启动。
                 let mut rec = ChildRecord {
                     child: None,
                     #[cfg(windows)]
                     job_handle: None,
                     last_spawn: Instant::now(),
+                    want_run: should_run && !paused.contains(&entry.name),
                     entry: entry.clone(),
                 };
                 if should_run && !paused.contains(&entry.name) {
@@ -582,11 +598,14 @@ fn reconcile(
                             );
                         }
                     }
+                    // v0.4.7: 表达意图（跟 None 分支语义对齐）
+                    rec.want_run = should_run && !paused.contains(&entry.name);
                 } else if was_startup && !is_startup && !manual.contains(&entry.name) {
                     // startup true→false：kill（除非被手动 start 过）
                     kill_tree_windows(rec, sup_log_path);
                     rec.last_spawn = Instant::now();
                     rec.entry = entry.clone();
+                    rec.want_run = false; // v0.4.7: kill 后不期望再跑
                     log_line(
                         sup_log_path,
                         &format!("startup disabled, stopping '{}'", entry.name),
@@ -594,6 +613,7 @@ fn reconcile(
                 } else if !was_startup && is_startup && !paused.contains(&entry.name) {
                     // startup false→true：spawn（除非被手动 stop 过）
                     rec.entry = entry.clone();
+                    rec.want_run = true; // v0.4.7: 显式标记期望运行
                     let entry_clone = entry.clone();
                     if let Err(e) = spawn_one(&entry_clone, svcctl_dir, rec, sup_log_path) {
                         log_line(

@@ -8,6 +8,9 @@ Cross-platform user-level autostart with a single supervisor process. Register a
 # Add a command — first add also installs the OS-level supervisor
 svcctl add bunx cctra
 
+# Opt-in auto-restart on crash (default: don't restart)
+svcctl add bunx cctra --restart
+
 # List registered entries
 svcctl ls
 
@@ -21,6 +24,21 @@ svcctl remove bunx-cctra
 # Status
 svcctl status
 ```
+
+### Manual vs auto vs auto-restart
+
+Each entry has two independent knobs in `~/.svcctl/entries.toml`:
+
+| Field      | Default | Meaning                                                    |
+|------------|---------|------------------------------------------------------------|
+| `startup`  | `true`  | `false` = manual only (supervisor won't spawn at boot)    |
+| `restart`  | `false` | `true` = opt-in auto-restart on child exit                 |
+
+- `startup = false` (manual) entry won't be spawned when the supervisor starts.
+  Run `svcctl start <name>` to launch it.
+- `restart = true` opts into auto-restart when the child dies. Default is **off**
+  — most programs have internal try/catch and supervisor restart is extra
+  complexity you probably don't need.
 
 ## How it works
 

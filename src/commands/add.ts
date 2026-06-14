@@ -16,6 +16,8 @@ export interface AddOptions {
   cwd?: string;
   env?: string[]; // ["KEY=VAL", ...]
   noInstall?: boolean;
+  /** v0.4.7: 子进程死了 opt-in 自动重启 */
+  restart?: boolean;
 }
 
 export async function addCommand(commandArgs: string[], opts: AddOptions): Promise<void> {
@@ -82,6 +84,7 @@ export async function addCommand(commandArgs: string[], opts: AddOptions): Promi
     args,
     ...(opts.cwd ? { cwd: opts.cwd } : {}),
     ...(Object.keys(env).length > 0 ? { env } : {}),
+    ...(opts.restart ? { restart: true } : {}),
     createdAt: new Date().toISOString(),
   };
 
@@ -91,7 +94,9 @@ export async function addCommand(commandArgs: string[], opts: AddOptions): Promi
     error((e as Error).message);
     process.exit(1);
   }
-  success(`added entry "${name}" → ${command} ${args.join(" ")}`);
+  success(
+    `added entry "${name}" → ${command} ${args.join(" ")}${opts.restart ? " (auto-restart on crash)" : ""}`
+  );
 
   // 5. 首次 add → 自动 install
   if (!opts.noInstall && !existsSync(installedFlagPath())) {
@@ -117,17 +122,19 @@ export function register(program: Command): void {
     .option("-n, --name <name>", "explicit entry name (default: derived from command)")
     .option("--cwd <cwd>", "working directory")
     .option("-e, --env <kv...>", "env var KEY=VAL (can repeat)")
+    .option("--restart", "opt-in auto-restart on child exit (v0.4.7)")
     .option("--no-install", "skip auto-install on first add")
     .action(
       async (
         cmd: string[],
-        opts: { name?: string; cwd?: string; env?: string[]; install?: boolean }
+        opts: { name?: string; cwd?: string; env?: string[]; install?: boolean; restart?: boolean }
       ) => {
         await addCommand(cmd, {
           name: opts.name,
           cwd: opts.cwd,
           env: opts.env,
           noInstall: opts.install === false,
+          restart: opts.restart === true,
         });
       }
     );

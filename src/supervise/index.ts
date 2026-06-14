@@ -144,7 +144,11 @@ export async function runSupervisor(): Promise<void> {
             writeChildrenJson();
           }
           // 跳过手动 stop 的 entry
-          if (!rec.proc && now - rec.lastSpawn >= backoffMs && !pausedSet.has(name)) {
+          // v0.4.7: 加 rec.entry.restart 条件 —— opt-in 才在死后重启
+          if (!rec.proc
+              && rec.entry.restart
+              && now - rec.lastSpawn >= backoffMs
+              && !pausedSet.has(name)) {
             spawnChild(name, rec.entry);
           }
         }

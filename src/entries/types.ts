@@ -14,6 +14,10 @@ export interface Entry {
   createdAt: string;
   /** 是否开机自启（默认 true）。false = 仅手动 start */
   startup?: boolean;
+  /** v0.4.7: 子进程死了是否 opt-in 自动重启。默认 false —— 大部分程序内部都有
+   *  全局 catch 不容易死，supervisor 兜底是额外复杂度；想要兜底就 entries.toml 加
+   *  `restart = true` 或 `svcctl add --restart ...` */
+  restart?: boolean;
   /** 可选 healthcheck URL（v1 status 暂不读，先留字段） */
   healthcheckUrl?: string;
 }

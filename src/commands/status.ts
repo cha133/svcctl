@@ -65,6 +65,8 @@ async function statusEntry(query: string): Promise<void> {
   }
   console.log(kvRow("created", entry.createdAt));
   console.log(kvRow("startup", entry.startup === false ? yellow("manual") : dim("auto (boot)")));
+  // v0.4.7: opt-in auto-restart 状态
+  console.log(kvRow("restart", entry.restart === true ? green("yes (opt-in)") : dim("no")));
   if (entry.healthcheckUrl) {
     console.log(kvRow("healthcheck", entry.healthcheckUrl));
   }
