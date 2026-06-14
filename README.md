@@ -1,6 +1,6 @@
 # svcctl (service control)
 
-Cross-platform system startup supervisor. Register any command as a user-level autostart item on Windows, macOS, and Linux with one CLI.
+Cross-platform user-level autostart with a single supervisor process. Register any command to auto-start at login on Windows, macOS, and Linux — the supervisor keeps each child alive, captures logs, and hot-reloads on changes.
 
 ## Quick start
 
