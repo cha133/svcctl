@@ -30,8 +30,21 @@ export async function upgradeCommand(): Promise<void> {
     return;
   }
 
-  const installed = normalizeVersion(readExeVersion(windowsSupervisorPath())) || "?";
   const current = currentVersion();
+  const installed = normalizeVersion(readExeVersion(windowsSupervisorPath())) || "?";
+
+  // v0.4.14: verify bundled PE 跟 currentVersion 一致——否则 dev 用户没重 build 就跑 upgrade，
+  // 会把错位的 binary 当新版装上去（误导性 success "upgraded to vX.Y.Z"，实际装的是旧版）
+  const bundledPath = defaultWindowsSupervisorPath();
+  const bundledVer = normalizeVersion(readExeVersion(bundledPath));
+  if (!bundledVer || bundledVer !== current) {
+    error(
+      `bundled supervisor (${bundledPath}) is v${bundledVer || "?"}, ` +
+      `but CLI version is v${current}. Run \`bun run build:launcher\` first to rebuild.`,
+    );
+    process.exit(1);
+  }
+
   info(`upgrading supervisor from v${installed} to v${current}`);
 
   // Windows + supervisor 跑着 → 问 restart → yes → stop → copy → 自动 start
@@ -47,7 +60,7 @@ export async function upgradeCommand(): Promise<void> {
   }
 
   // supervisor 没跑着 或刚 stop → 直接 copy（不会失败）
-  const result = await upgradeWindowsSupervisor(defaultWindowsSupervisorPath());
+  const result = await upgradeWindowsSupervisor(bundledPath);
   if (result === "up-to-date") {
     warn(`Upgrade failed. Try again after stopping supervisor.`);
     return;
