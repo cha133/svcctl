@@ -13,7 +13,7 @@ import { defaultWindowsSupervisorPath } from "../install";
 import { upgradeWindowsSupervisor, currentVersion } from "../install/windows";
 import { stopCommand } from "./stop";
 import { startCommand } from "./start";
-import { success, info, error, warn } from "../format";
+import { success, info, error } from "../format";
 import { windowsSupervisorPath } from "../paths";
 import { readExeVersion, normalizeVersion } from "../install/exe-version";
 
@@ -35,7 +35,7 @@ export async function upgradeCommand(): Promise<void> {
     return;
   }
   // needs-restart：supervisor 跑着，新二进制已就位
-  warn(`supervisor binary prepared for upgrade to v${current} (restart to apply)`);
+  // （upgradeWindowsSupervisor 内部已打了 info 提示，这里不再重复 warn）
 
   if (isSupervisorRunning()) {
     const choice = await promptYesNo("Restart supervisor now? [Y/n]", true);
