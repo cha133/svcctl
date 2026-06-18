@@ -12,7 +12,7 @@ import { windowsSupervisorPath, supervisorPidPath } from "../paths";
 import { findEntry, EntryNotFoundError, EntryAmbiguousError } from "../entries/match";
 import { success, error, info } from "../format";
 import { isInstalled } from "../install";
-import { isSupervisorRunning, sendControlCommand, waitForControlProcessed, ensureSupervisorUpToDate, warnSupervisorOutdated, getInstalledSupervisorVersion } from "./helpers";
+import { isSupervisorRunning, sendControlCommand, waitForControlProcessed, checkSupervisorVersion, warnSupervisorOutdated } from "./helpers";
 import type { Command } from "commander";
 
 const START_TIMEOUT_MS = 5000;
@@ -30,18 +30,13 @@ export async function startCommand(name?: string): Promise<void> {
     process.exit(1);
   }
 
-  // 启动前确保 supervisor 二进制是最新版
-  const status = await ensureSupervisorUpToDate();
-  if (status === "upgraded") {
-    // 已自动升级，正常启动
+  // v0.4.11: 只 check version，outdated 时 warn（升级统一收口到 `svcctl upgrade`）
+  if (await checkSupervisorVersion() === "outdated") {
+    warnSupervisorOutdated();
   }
 
   if (isSupervisorRunning()) {
-    if (status === "needs-restart") {
-      warnSupervisorOutdated(getInstalledSupervisorVersion());
-    } else {
-      info("supervisor is already running.");
-    }
+    info("supervisor is already running.");
     return;
   }
 
@@ -69,10 +64,9 @@ async function startEntry(name: string): Promise<void> {
     process.exit(1);
   }
 
-  // supervisor 运行中但版本过旧 → 警告
-  const status = await ensureSupervisorUpToDate();
-  if (status === "needs-restart") {
-    warnSupervisorOutdated(getInstalledSupervisorVersion());
+  // v0.4.11: outdated 时 warn（升级收口到 `svcctl upgrade`）
+  if (await checkSupervisorVersion() === "outdated") {
+    warnSupervisorOutdated();
   }
 
   sendControlCommand("start", resolved.name);

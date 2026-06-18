@@ -5,8 +5,9 @@ import { execSync } from "node:child_process";
 import { copyFileSync, existsSync, renameSync, writeFileSync, unlinkSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureSvcctlDir, windowsSupervisorPath, installedFlagPath, ensureDir, supervisorVersionPath, supervisorPidPath } from "../paths";
+import { ensureSvcctlDir, windowsSupervisorPath, installedFlagPath, ensureDir, supervisorPidPath } from "../paths";
 import { info, warn } from "../format";
+import { readExeVersion, normalizeVersion } from "./exe-version";
 
 const REG_KEY = `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run`;
 const REG_NAME = "SvcCtl";
@@ -43,8 +44,7 @@ export function installWindows(bundledSupervisorPath: string): void {
   // 写 installed.flag
   writeFileSync(installedFlagPath(), dest, "utf-8");
 
-  // 写版本文件
-  writeFileSync(supervisorVersionPath(), currentVersion(), "utf-8");
+  // v0.4.11: 删 supervisor.version 文件 —— PE FileVersion 是 ground truth
 }
 
 /** uninstall: 删注册表 + 删 .exe */
@@ -103,28 +103,21 @@ export function currentVersion(): string {
   }
 }
 
-/** 原子写文件：先写 .tmp 再 renameSync 覆盖目标。Windows 上 NTFS rename 原子替换。 */
-function atomicWriteSync(targetPath: string, content: string): void {
-  const tmp = targetPath + ".tmp";
-  writeFileSync(tmp, content, "utf-8");
-  renameSync(tmp, targetPath);
-}
-
 /**
  * 升级 Windows supervisor 二进制（如果版本不匹配）。
  *
  * 返回：
  *   "up-to-date"     — 版本一致，无需操作
- *   "upgraded"       — 已复制新二进制 + 更新版本文件
+ *   "upgraded"       — 已复制新二进制
  *   "needs-restart"  — supervisor 运行中，已用 NTFS rename 技巧准备好新二进制，需重启才生效
  *
+ * v0.4.11: 改用 PE FileVersion 判定（build.rs 嵌到 PE 资源），删 supervisor.version 文件。
  * 升级策略：
- *   1. supervisor 没运行 → 直接 copyFileSync 覆盖 + 写版本戳
+ *   1. supervisor 没运行 → 直接 copyFileSync 覆盖
  *   2. supervisor 运行中 → NTFS rename 技巧：
- *      a) unlink 上次的 .old（v0.4.4 stop 正确杀进程树，不再有文件锁）
+ *      a) unlink 上次的 .old
  *      b) 把 dest rename 到 .old
  *      c) copyFileSync bundled → dest
- *   3. 写版本戳（原子写 + 重试 3 次应对 AV 瞬时锁）
  */
 export async function upgradeWindowsSupervisor(
   bundledPath: string,
@@ -133,17 +126,13 @@ export async function upgradeWindowsSupervisor(
   if (!existsSync(bundledPath)) return "up-to-date"; // bundled 不存在就不升级
 
   const dest = windowsSupervisorPath();
-  const versionPath = supervisorVersionPath();
   const ver = currentVersion();
 
-  // 读取已安装版本
-  let installedVer = "";
-  if (existsSync(versionPath)) {
-    try { installedVer = readFileSync(versionPath, "utf-8").trim(); } catch {}
+  // v0.4.11: 读 PE FileVersion 判定（build.rs winres 嵌的，跟 Cargo.toml 同步）
+  const installedVer = readExeVersion(dest);
+  if (installedVer && normalizeVersion(installedVer) === ver && existsSync(dest)) {
+    return "up-to-date";
   }
-
-  // 版本一致 + dest 存在 → 无需操作
-  if (installedVer === ver && existsSync(dest)) return "up-to-date";
 
   // 确保目标目录存在
   ensureDir(dirname(dest));
@@ -165,7 +154,6 @@ export async function upgradeWindowsSupervisor(
     // supervisor 没运行，直接覆盖
     try {
       copyFileSync(bundledPath, dest);
-      atomicWriteSync(versionPath, ver);
       info(`supervisor binary updated to v${ver}`);
       return "upgraded";
     } catch (e) {
@@ -208,28 +196,6 @@ export async function upgradeWindowsSupervisor(
     warn(
       `failed to copy new supervisor ${bundledPath} → ${dest}: ` +
       `${(e as Error).message}; old binary is at ${oldPath}, upgrade will retry on next run.`,
-    );
-    return "needs-restart";
-  }
-
-  // 4) 原子写版本戳（write .tmp + renameSync）；重试 3 次应对 AV 瞬时锁
-  let stampErr: Error | null = null;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      atomicWriteSync(versionPath, ver);
-      stampErr = null;
-      break;
-    } catch (e) {
-      stampErr = e as Error;
-      if (attempt < 3) {
-        await new Promise<void>((r) => setTimeout(r, 100));
-      }
-    }
-  }
-  if (stampErr) {
-    warn(
-      `supervisor version stamp write failed after 3 attempts: ${stampErr.message}; ` +
-      `binary is replaced but stamp is stale — next call will retry.`,
     );
     return "needs-restart";
   }

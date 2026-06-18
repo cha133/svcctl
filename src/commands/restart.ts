@@ -6,7 +6,7 @@
  */
 import { findEntry, EntryNotFoundError, EntryAmbiguousError } from "../entries/match";
 import { success, error } from "../format";
-import { isSupervisorRunning, sendControlCommand, waitForControlProcessed, ensureSupervisorUpToDate, warnSupervisorOutdated, getInstalledSupervisorVersion } from "./helpers";
+import { isSupervisorRunning, sendControlCommand, waitForControlProcessed, checkSupervisorVersion, warnSupervisorOutdated } from "./helpers";
 import type { Command } from "commander";
 
 export async function restartCommand(name: string): Promise<void> {
@@ -17,10 +17,9 @@ export async function restartCommand(name: string): Promise<void> {
     process.exit(1);
   }
 
-  // supervisor 运行中但版本过旧 → 警告
-  const status = await ensureSupervisorUpToDate();
-  if (status === "needs-restart") {
-    warnSupervisorOutdated(getInstalledSupervisorVersion());
+  // supervisor 运行中但版本过旧 → 警告（v0.4.11 升级收口到 `svcctl upgrade`）
+  if (await checkSupervisorVersion() === "outdated") {
+    warnSupervisorOutdated();
   }
 
   sendControlCommand("restart", resolved.name);

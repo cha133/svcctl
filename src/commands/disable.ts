@@ -8,16 +8,15 @@
 import { findEntry, EntryNotFoundError, EntryAmbiguousError } from "../entries/match";
 import { loadEntries, saveEntries } from "../entries/store";
 import { success, error } from "../format";
-import { ensureSupervisorUpToDate, warnSupervisorOutdated, getInstalledSupervisorVersion } from "./helpers";
+import { checkSupervisorVersion, warnSupervisorOutdated } from "./helpers";
 import type { Command } from "commander";
 
 export async function disableCommand(name: string): Promise<void> {
   const resolved = findEntry(name);
 
-  // supervisor 运行中但版本过旧 → 警告（需要 supervisor 热加载 startup 变化）
-  const status = await ensureSupervisorUpToDate();
-  if (status === "needs-restart") {
-    warnSupervisorOutdated(getInstalledSupervisorVersion());
+  // supervisor 运行中但版本过旧 → 警告（v0.4.11 升级收口到 `svcctl upgrade`）
+  if (await checkSupervisorVersion() === "outdated") {
+    warnSupervisorOutdated();
   }
 
   const file = loadEntries();

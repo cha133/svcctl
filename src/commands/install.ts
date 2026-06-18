@@ -4,18 +4,16 @@
 import { install as doInstall, uninstall as doUninstall, isInstalled } from "../install";
 import { success, error, info } from "../format";
 import { stopCommand } from "./stop";
-import { ensureSupervisorUpToDate, getInstalledSupervisorVersion } from "./helpers";
+import { checkSupervisorVersion, warnSupervisorOutdated } from "./helpers";
 import type { Command } from "commander";
 
 export async function installCommand(): Promise<void> {
   if (isInstalled()) {
-    // 已安装：仍然确保 supervisor 二进制是最新版
-    const status = await ensureSupervisorUpToDate();
-    if (status === "upgraded") {
-      success("supervisor binary updated.");
-    } else if (status === "needs-restart") {
-      const v = getInstalledSupervisorVersion();
-      info(`supervisor is running v${v ?? "an older version"}. Restart to upgrade: svcctl stop && svcctl start`);
+    // v0.4.11: 已安装 → 只 check version，outdated 时 warn 让用户跑 `svcctl upgrade`
+    // （不再自动升级；升级统一收口到 `svcctl upgrade` 命令）
+    const status = await checkSupervisorVersion();
+    if (status === "outdated") {
+      warnSupervisorOutdated();
     } else {
       info("svcctl is already installed and up-to-date.");
     }

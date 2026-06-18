@@ -3,10 +3,10 @@
  */
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { emitKeypressEvents } from "node:readline";
-import { supervisorPidPath, controlJsonPath, childrenJsonPath, supervisorVersionPath } from "../paths";
+import { supervisorPidPath, controlJsonPath, childrenJsonPath, windowsSupervisorPath } from "../paths";
 import { entryPid } from "../entries/match";
-import { upgradeWindowsSupervisor, currentVersion } from "../install/windows";
-import { defaultWindowsSupervisorPath } from "../install";
+import { currentVersion } from "../install/windows";
+import { readExeVersion, normalizeVersion } from "../install/exe-version";
 import { warn } from "../format";
 
 /** 检查 supervisor 是否在跑（PID 文件存在 + 进程存活） */
@@ -68,48 +68,28 @@ export async function waitForEntryGone(
   return "timeout";
 }
 
-export type SupervisorVersionStatus = "up-to-date" | "upgraded" | "needs-restart";
+export type SupervisorVersionStatus = "up-to-date" | "outdated";
 
 /**
- * 读取已安装的 supervisor 版本号（从 supervisor.version 文件）。
- * 文件不存在/读失败/内容为空 → 返回 null。
- */
-export function getInstalledSupervisorVersion(): string | null {
-  const p = supervisorVersionPath();
-  if (!existsSync(p)) return null;
-  try {
-    const v = readFileSync(p, "utf-8").trim();
-    return v.length > 0 ? v : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 确保 supervisor 二进制是最新版本。
+ * v0.4.11: 只 check supervisor version，不 upgrade。
+ * 升级统一在 `svcctl upgrade` 命令里做（src/commands/upgrade.ts）。
+ * 其他命令（start/install/stop）调这个，如果 outdated 就 warn 但不阻止。
  *
- * - macOS/Linux：Node.js supervisor 始终用最新代码，直接返回 "up-to-date"
- * - Windows：对比版本文件与当前 CLI 版本，不匹配时自动复制新二进制
- *
- * 返回：
- *   "up-to-date"     — 版本一致
- *   "upgraded"       — 已自动升级二进制
- *   "needs-restart"  — supervisor 运行中，新版已就位但需重启
+ * - macOS/Linux：Node.js supervisor 始终用最新代码，永远 up-to-date
+ * - Windows：读 PE FileVersion 跟 currentVersion 对比
  */
-export async function ensureSupervisorUpToDate(): Promise<SupervisorVersionStatus> {
+export async function checkSupervisorVersion(): Promise<SupervisorVersionStatus> {
   if (process.platform !== "win32") return "up-to-date";
-  const bundled = defaultWindowsSupervisorPath();
-  return await upgradeWindowsSupervisor(bundled);
+  const installed = readExeVersion(windowsSupervisorPath());
+  if (!installed) return "outdated"; // 文件不存在
+  return normalizeVersion(installed) === normalizeVersion(currentVersion())
+    ? "up-to-date"
+    : "outdated";
 }
 
 /** supervisor 版本过旧时的标准警告消息 */
-export function warnSupervisorOutdated(installedVer: string | null): void {
-  const current = currentVersion();
-  const verHint = installedVer ? `v${installedVer}` : "an older version";
-  warn(
-    `Supervisor ${verHint} is running, current is v${current}. Restart to apply upgrade.\n` +
-    `  svcctl stop && svcctl start`
-  );
+export function warnSupervisorOutdated(): void {
+  warn(`Supervisor is outdated. Run \`svcctl upgrade\` to update.`);
 }
 
 /**

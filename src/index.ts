@@ -13,6 +13,7 @@ import { register as registerStatus } from "./commands/status";
 import { register as registerEnable } from "./commands/enable";
 import { register as registerDisable } from "./commands/disable";
 import { register as registerInstall } from "./commands/install";
+import { register as registerUpgrade } from "./commands/upgrade";
 import { runSupervisor } from "./supervise";
 import { error } from "./format";
 import pkg from "../package.json" with { type: "json" };
@@ -34,6 +35,7 @@ registerStatus(program);
 registerEnable(program);
 registerDisable(program);
 registerInstall(program);
+registerUpgrade(program);
 
 // 隐藏子命令：被 launchd / systemd / HKCU\Run 触发
 program

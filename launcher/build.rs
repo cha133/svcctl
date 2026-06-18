@@ -2,6 +2,9 @@
 // 其他平台 no-op（避免对非 Windows 构建报错）
 
 fn main() {
+    // v0.4.11: Cargo.toml 改了要重 build.rs（否则 env!("CARGO_PKG_VERSION") 还是
+    // build.rs binary 上次编译时的值，嵌到 PE 的 FileVersion 就跟 Cargo.toml 错位）
+    println!("cargo:rerun-if-changed=Cargo.toml");
     // 图标变了就重新跑 build.rs
     println!("cargo:rerun-if-changed=assets/svcctl.ico");
     println!("cargo:rerun-if-changed=build.rs");

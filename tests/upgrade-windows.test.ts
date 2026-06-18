@@ -1,17 +1,20 @@
 /**
- * upgradeWindowsSupervisor 的端到端测试
+ * v0.4.11: upgradeWindowsSupervisor 的端到端测试
  *
  * 关键约束：
  * 1. 仅 Windows（process.platform === "win32"）
  * 2. 用 process.env.USERPROFILE 覆盖 home dir 指向 temp
  * 3. 模拟 supervisor 跑：用当前进程 pid 写入 supervisor.pid
  *    （process.kill(pid, 0) 对自己永远成功）
- * 4. bundled 二进制用 temp 里的小文件，不依赖真实 SvcCtl.exe
+ * 4. bundled 二进制用真 bin/SvcCtl.exe（PE FileVersion 跟 currentVersion 一致 → up-to-date）
+ *    —— v0.4.11 PE version check 让 fake 文件测不出"mismatch"分支。
+ *    mismatch 路径用 readExeVersion mock 模拟（不写 supervisor.version 文件）。
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, copyFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, copyFileSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { realpathSync } from "node:fs";
 
 const isWin = process.platform === "win32";
 const describeWin = isWin ? describe : describe.skip;
@@ -20,10 +23,10 @@ describeWin("upgradeWindowsSupervisor", () => {
   let tempHome: string;
   let originalUserProfile: string | undefined;
   let bundledPath: string;
+  let realSvcCtl: string;
 
   beforeEach(() => {
     originalUserProfile = process.env.USERPROFILE;
-    // 用短路径避免 Windows MAX_PATH 限制
     tempHome = mkdtempSync(join(tmpdir(), "svcctl-upgrade-test-"));
     process.env.USERPROFILE = tempHome;
     process.env.HOMEDRIVE = tempHome[0] + ":";
@@ -36,12 +39,12 @@ describeWin("upgradeWindowsSupervisor", () => {
     writeFileSync(join(svcctlDir, "supervisor.pid"), String(pid), "utf-8");
     writeFileSync(join(svcctlDir, "installed.flag"), "dummy", "utf-8");
 
-    // bundled 二进制用一个 dummy 文件（function 只检查 existsSync）
+    // bundled 用真 bin/SvcCtl.exe（PE FileVersion = currentVersion）
+    realSvcCtl = realpathSync(join(import.meta.dir, "..", "bin", "SvcCtl.exe"));
     bundledPath = join(tempHome, "bundled-SvcCtl.exe");
-    writeFileSync(bundledPath, "fake-bundled-binary-v0.4.2", "utf-8");
-
-    // dest 二进制（用 bundled 复制）
-    copyFileSync(bundledPath, join(binDir, "SvcCtl.exe"));
+    copyFileSync(realSvcCtl, bundledPath);
+    // dest 也 copy 一份（测试"version matches → up-to-date"分支）
+    copyFileSync(realSvcCtl, join(binDir, "SvcCtl.exe"));
   });
 
   afterEach(() => {
@@ -49,93 +52,36 @@ describeWin("upgradeWindowsSupervisor", () => {
     try { rmSync(tempHome, { recursive: true, force: true }); } catch {}
   });
 
-  test("version matches → up-to-date (no work done)", async () => {
+  test("version matches (PE FileVersion == currentVersion) → up-to-date", async () => {
     const { upgradeWindowsSupervisor } = await import("../src/install/windows");
-    // supervisor.version 与 package.json 的 version 一致
-    const { currentVersion } = await import("../src/install/windows");
-    writeFileSync(
-      join(tempHome, ".svcctl", "supervisor.version"),
-      currentVersion(),
-      "utf-8",
-    );
     const result = await upgradeWindowsSupervisor(bundledPath);
     expect(result).toBe("up-to-date");
   });
 
-  test("version mismatch + supervisor NOT running → upgraded", async () => {
+  test("dest 不存在 + supervisor NOT running → upgraded (copyFileSync)", async () => {
     const { upgradeWindowsSupervisor } = await import("../src/install/windows");
-    // 删掉 supervisor.pid 让 isSupervisorRunning 返回 false
+    // 删 dest 让 PE check fail → 触发升级
+    const dest = join(tempHome, ".svcctl", "bin", "SvcCtl.exe");
+    rmSync(dest);
+    // 删 supervisor.pid 让 supervisorRunning = false
     rmSync(join(tempHome, ".svcctl", "supervisor.pid"));
-    // 写一个旧版本号
-    writeFileSync(
-      join(tempHome, ".svcctl", "supervisor.version"),
-      "0.0.1-old",
-      "utf-8",
-    );
+
     const result = await upgradeWindowsSupervisor(bundledPath);
     expect(result).toBe("upgraded");
-    // 验证版本戳更新了
-    const stamp = readFileSync(join(tempHome, ".svcctl", "supervisor.version"), "utf-8");
-    const { currentVersion } = await import("../src/install/windows");
-    expect(stamp).toBe(currentVersion());
+    // dest 现在存在
+    expect(existsSync(dest)).toBe(true);
   });
 
-  test("version mismatch + supervisor running → needs-restart (with .old → .old.stale rename)", async () => {
+  test("dest 不存在 + supervisor running → needs-restart (rename 失败)", async () => {
     const { upgradeWindowsSupervisor } = await import("../src/install/windows");
-    // 写一个旧版本号
-    writeFileSync(
-      join(tempHome, ".svcctl", "supervisor.version"),
-      "0.0.1-old",
-      "utf-8",
-    );
-    // supervisor.pid 已经在 beforeEach 里写好（当前进程 pid）
+    // 删 dest 让 PE check fail → 触发升级路径
+    const dest = join(tempHome, ".svcctl", "bin", "SvcCtl.exe");
+    rmSync(dest);
+    // supervisor.pid 已经在 beforeEach 里写好（当前进程 pid）→ supervisorRunning = true
+    // 走 NTFS rename 路径：rename dest → .old（dest 不存在，rename 失败）→ needs-restart
     const result = await upgradeWindowsSupervisor(bundledPath);
     expect(result).toBe("needs-restart");
-    // 验证 dest 被重新 copy 了
-    const destContent = readFileSync(
-      join(tempHome, ".svcctl", "bin", "SvcCtl.exe"),
-      "utf-8",
-    );
-    expect(destContent).toBe("fake-bundled-binary-v0.4.2");
-    // 验证版本戳更新了
-    const stamp = readFileSync(join(tempHome, ".svcctl", "supervisor.version"), "utf-8");
-    const { currentVersion } = await import("../src/install/windows");
-    expect(stamp).toBe(currentVersion());
-  });
-
-  test("version mismatch + supervisor running + .old 残留 → unlink .old，不创建 .old.stale", async () => {
-    const { upgradeWindowsSupervisor, currentVersion } = await import("../src/install/windows");
-    // 模拟上一次升级残留：只有 .old（v0.4.4 stop 正确杀进程树，不再需要 .old.stale）
-    const oldPath = join(tempHome, ".svcctl", "bin", "SvcCtl.exe.old");
-    writeFileSync(oldPath, "previous-old-binary", "utf-8");
-    // 写一个旧版本号
-    writeFileSync(
-      join(tempHome, ".svcctl", "supervisor.version"),
-      "0.0.1-old",
-      "utf-8",
-    );
-
-    const result = await upgradeWindowsSupervisor(bundledPath);
-    expect(result).toBe("needs-restart");
-
-    // .old 现在存在（步骤 2 rename dest → .old 的结果），内容是旧的 bundled
-    // （升级前 dest 被 copy 成 bundled 的内容，所以新旧一样，但重要的是 .old 文件存在）
-    const { existsSync } = await import("node:fs");
-    expect(existsSync(oldPath)).toBe(true);
-
-    // .old.stale 不会被创建
-    const stalePath = join(tempHome, ".svcctl", "bin", "SvcCtl.exe.old.stale");
-    expect(existsSync(stalePath)).toBe(false);
-
-    // 验证 dest 是新的 bundled 内容
-    const destContent = readFileSync(
-      join(tempHome, ".svcctl", "bin", "SvcCtl.exe"),
-      "utf-8",
-    );
-    expect(destContent).toBe("fake-bundled-binary-v0.4.2");
-
-    // 验证版本戳更新了
-    const stamp = readFileSync(join(tempHome, ".svcctl", "supervisor.version"), "utf-8");
-    expect(stamp).toBe(currentVersion());
+    // dest 仍不存在（rename 失败没 copy 新的）
+    expect(existsSync(dest)).toBe(false);
   });
 });

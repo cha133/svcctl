@@ -24,7 +24,7 @@ import {
 } from "../install";
 import { logPath, supervisorLogPath, supervisorPidPath, svcctlDir } from "../paths";
 import { bold, dim, error, green, info, kvRow, red, yellow } from "../format";
-import { ensureSupervisorUpToDate, warnSupervisorOutdated, getInstalledSupervisorVersion } from "./helpers";
+import { checkSupervisorVersion, warnSupervisorOutdated } from "./helpers";
 import type { Command } from "commander";
 
 export async function statusCommand(name?: string): Promise<void> {
@@ -47,10 +47,9 @@ async function statusEntry(query: string): Promise<void> {
     throw e;
   }
 
-  // supervisor 运行中但版本过旧 → 警告
-  const status = await ensureSupervisorUpToDate();
-  if (status === "needs-restart") {
-    warnSupervisorOutdated(getInstalledSupervisorVersion());
+  // supervisor 运行中但版本过旧 → 警告（v0.4.11 升级收口到 `svcctl upgrade`）
+  if (await checkSupervisorVersion() === "outdated") {
+    warnSupervisorOutdated();
   }
 
   // 1) 头部 + 静态信息
