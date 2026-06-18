@@ -2,10 +2,10 @@
  * Windows: HKCU\Run + copy supervisor.exe 到 ~/.svcctl/bin/
  */
 import { execSync } from "node:child_process";
-import { copyFileSync, existsSync, renameSync, writeFileSync, unlinkSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, writeFileSync, unlinkSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureSvcctlDir, windowsSupervisorPath, installedFlagPath, ensureDir, supervisorPidPath } from "../paths";
+import { ensureSvcctlDir, windowsSupervisorPath, installedFlagPath, ensureDir } from "../paths";
 import { info, warn } from "../format";
 import { readExeVersion, normalizeVersion } from "./exe-version";
 
@@ -104,24 +104,19 @@ export function currentVersion(): string {
 }
 
 /**
- * 升级 Windows supervisor 二进制（如果版本不匹配）。
+ * v0.4.13: 升级 Windows supervisor 二进制（如果版本不匹配）。
  *
  * 返回：
- *   "up-to-date"     — 版本一致，无需操作
- *   "upgraded"       — 已复制新二进制
- *   "needs-restart"  — supervisor 运行中，已用 NTFS rename 技巧准备好新二进制，需重启才生效
+ *   "up-to-date"  — 版本一致，无需操作
+ *   "upgraded"    — 已复制新二进制（dest 不被锁时；caller 保证 dest 解锁）
  *
- * v0.4.11: 改用 PE FileVersion 判定（build.rs 嵌到 PE 资源），删 supervisor.version 文件。
- * 升级策略：
- *   1. supervisor 没运行 → 直接 copyFileSync 覆盖
- *   2. supervisor 运行中 → NTFS rename 技巧：
- *      a) unlink 上次的 .old
- *      b) 把 dest rename 到 .old
- *      c) copyFileSync bundled → dest
+ * v0.4.13 改动：删 NTFS rename trick（修了好几个版本，浪费 100M token）。
+ * 现在 caller 必须保证 dest 没锁——supervisor 没跑，或 caller 先 stop supervisor。
+ * `svcctl upgrade` 走 stop → copy → start 干净路径。
  */
 export async function upgradeWindowsSupervisor(
   bundledPath: string,
-): Promise<"up-to-date" | "upgraded" | "needs-restart"> {
+): Promise<"up-to-date" | "upgraded"> {
   if (process.platform !== "win32") return "up-to-date";
   if (!existsSync(bundledPath)) return "up-to-date"; // bundled 不存在就不升级
 
@@ -137,69 +132,14 @@ export async function upgradeWindowsSupervisor(
   // 确保目标目录存在
   ensureDir(dirname(dest));
 
-  // 检查 supervisor 是否在运行
-  let supervisorRunning = false;
-  const pidPath = supervisorPidPath();
-  if (existsSync(pidPath)) {
-    try {
-      const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
-      if (pid > 0) {
-        process.kill(pid, 0);
-        supervisorRunning = true;
-      }
-    } catch {}
-  }
-
-  if (!supervisorRunning) {
-    // supervisor 没运行，直接覆盖
-    try {
-      copyFileSync(bundledPath, dest);
-      info(`supervisor binary updated to v${ver}`);
-      return "upgraded";
-    } catch (e) {
-      warn(`supervisor binary update failed: ${(e as Error).message}`);
-      return "needs-restart";
-    }
-  }
-
-  // supervisor 运行中：NTFS rename 技巧
-  const oldPath = dest + ".old";
-
-  // 1) 删掉上次留下的 .old（v0.4.4 的 Job Object 保证进程树已杀光，文件不再被锁）
-  if (existsSync(oldPath)) {
-    try {
-      unlinkSync(oldPath);
-    } catch (e) {
-      warn(
-        `failed to remove old binary ${oldPath}: ${(e as Error).message}; ` +
-        `upgrade deferred until next run.`,
-      );
-      return "needs-restart";
-    }
-  }
-
-  // 2) 把 dest rename 到 .old
-  try {
-    renameSync(dest, oldPath);
-  } catch (e) {
-    warn(
-      `failed to move running supervisor ${dest} → ${oldPath}: ` +
-      `${(e as Error).message}; upgrade deferred until next run.`,
-    );
-    return "needs-restart";
-  }
-
-  // 3) copyFileSync bundled → dest
+  // 直接 copyFileSync（caller 保证 dest 没锁——supervisor 没跑，或刚 stop）
   try {
     copyFileSync(bundledPath, dest);
+    info(`supervisor binary updated to v${ver}`);
+    return "upgraded";
   } catch (e) {
-    warn(
-      `failed to copy new supervisor ${bundledPath} → ${dest}: ` +
-      `${(e as Error).message}; old binary is at ${oldPath}, upgrade will retry on next run.`,
-    );
-    return "needs-restart";
+    warn(`supervisor binary update failed: ${(e as Error).message}`);
+    // copy fail（dest 仍被锁——caller 没保证好） → 当 up-to-date 处理，caller 决定下一步
+    return "up-to-date";
   }
-
-  info(`supervisor binary prepared for upgrade to v${ver} (restart to apply)`);
-  return "needs-restart";
 }

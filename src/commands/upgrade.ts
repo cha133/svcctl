@@ -1,9 +1,15 @@
 /**
- * v0.4.11: `svcctl upgrade` 显式升级 supervisor 二进制。
+ * v0.4.13: `svcctl upgrade` 显式升级 supervisor 二进制。
  *
- * 之前 start / install / stop 都自动调 ensureSupervisorUpToDate() 隐式升级，
- * 跟其他命令耦合 + 容易出错（dest 锁着 / supervisor.version 写失败等）。
- * 现在升级统一收口到这一个命令，跑完交互式问用户是否自动 restart supervisor（默认 Yes）。
+ * 流程（删 NTFS rename trick）：
+ *   1. check PE version
+ *   2. supervisor 跑着 → 问用户是否 restart（默认 Yes；pipe 默认 Yes 不阻塞）
+ *      - 用户同意 → stopCommand → 等 supervisor exit → copyFileSync bundled → dest → startCommand
+ *      - 用户拒绝 → 提示手动 `svcctl stop && svcctl upgrade`
+ *   3. supervisor 没跑着 → 直接 copyFileSync → 提示 `svcctl start`
+ *
+ * 不再需要 .old 文件、NTFS rename、Job Object upgrade 路径——supervisor stop 后 dest
+ * 一定没锁，copyFileSync 一定能成功。
  */
 import { createInterface } from "node:readline";
 import { stdin, stdout } from "node:process";
@@ -13,7 +19,7 @@ import { defaultWindowsSupervisorPath } from "../install";
 import { upgradeWindowsSupervisor, currentVersion } from "../install/windows";
 import { stopCommand } from "./stop";
 import { startCommand } from "./start";
-import { success, info, error } from "../format";
+import { success, info, error, warn } from "../format";
 import { windowsSupervisorPath } from "../paths";
 import { readExeVersion, normalizeVersion } from "../install/exe-version";
 
@@ -24,30 +30,35 @@ export async function upgradeCommand(): Promise<void> {
     return;
   }
 
-  // outdated：显示当前 / 新版本（readExeVersion 返回 "0.4.11.0" 4 段，normalize 后 "0.4.11"）
   const installed = normalizeVersion(readExeVersion(windowsSupervisorPath())) || "?";
   const current = currentVersion();
   info(`upgrading supervisor from v${installed} to v${current}`);
 
+  // Windows + supervisor 跑着 → 问 restart → yes → stop → copy → 自动 start
+  let shouldStartAfter = false;
+  if (process.platform === "win32" && isSupervisorRunning()) {
+    const choice = await promptYesNo(`Restart supervisor to apply upgrade? [Y/n]`, true);
+    if (!choice) {
+      info(`Upgrade deferred. Run \`svcctl stop && svcctl upgrade\` later to apply.`);
+      return;
+    }
+    await stopCommand();
+    shouldStartAfter = true; // 用户同意 restart → 升级后自动 start
+  }
+
+  // supervisor 没跑着 或刚 stop → 直接 copy（不会失败）
   const result = await upgradeWindowsSupervisor(defaultWindowsSupervisorPath());
-  if (result === "up-to-date" || result === "upgraded") {
-    success(`upgraded to v${current}`);
+  if (result === "up-to-date") {
+    warn(`Upgrade failed. Try again after stopping supervisor.`);
     return;
   }
-  // needs-restart：supervisor 跑着，新二进制已就位
-  // （upgradeWindowsSupervisor 内部已打了 info 提示，这里不再重复 warn）
 
-  if (isSupervisorRunning()) {
-    const choice = await promptYesNo("Restart supervisor now? [Y/n]", true);
-    if (choice) {
-      await stopCommand();
-      await startCommand();
-      success("supervisor restarted with new binary.");
-    } else {
-      info("Run `svcctl stop && svcctl start` later to apply upgrade.");
-    }
+  // 升级成功
+  if (shouldStartAfter) {
+    await startCommand();
+    success(`upgraded to v${current}`);
   } else {
-    info("Run `svcctl start` to launch the new binary.");
+    info(`Run \`svcctl start\` to launch the new binary.`);
   }
 }
 
