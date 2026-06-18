@@ -34,6 +34,11 @@ use std::os::windows::io::AsRawHandle;
 use serde::{Deserialize, Serialize};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+// v0.4.15: child 是新 process group leader（pgid = child pid），
+// 让 send_ctrl_break 能 targeted 投递（GenerateConsoleCtrlEvent CTRL_BREAK_EVENT, pgid），
+// 不再依赖 supervisor (windows subsystem) 第一次 AttachConsole 的 broadcast 路径
+// （那条路径前几次 send 必 fail，console membership 注册有 race）。
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 const REAP_INTERVAL_MS: u64 = 1000;
 const RESTART_BACKOFF_MS: u64 = 1000;
 
@@ -282,7 +287,7 @@ fn process_control_file(
         }
     };
 
-    // v0.4.4: 先删 control.json 再做事 —— kill_tree_windows 里 30s
+    // v0.4.4: 先删 control.json 再做事 —— kill_tree_windows 里 5s（v0.4.9）
     // grace 等待不能阻塞 CLI 的 waitForControlProcessed（5s timeout）。
     // 这符合 systemctl 语义：命令返回后 daemon 异步完成工作。
     let _ = fs::remove_file(&control_path);
@@ -372,7 +377,7 @@ fn spawn_one(
         .stdin(Stdio::null())
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_err))
-        .creation_flags(CREATE_NO_WINDOW);
+        .creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
     if let Some(cwd) = &entry.cwd {
         cmd.current_dir(cwd);
     }
@@ -455,43 +460,49 @@ unsafe fn assign_to_job(job: *mut c_void, process_handle: *mut c_void) -> bool {
     AssignProcessToJobObject(job, process_handle) != 0
 }
 
-// v0.4.4: 温柔发 Ctrl+C 给指定 pid 的 console subsystem 进程。
-// supervisor 是 windows subsystem（无 console）必须先 AttachConsole 到目标进程，
-// 然后 SetConsoleCtrlHandler(None, TRUE) 屏蔽自己的 handler 避免自杀。
-// 返回 true 表示成功 attach + generate。
+// v0.4.15: 温柔发 ctrl+break 给指定 pid 的 console subsystem 进程（child 在新 process
+// group 里，pgid = child pid）。**比 v0.4.4 的 CTRL_C_EVENT broadcast 可靠**：
+// 老方案 supervisor 是 windows-subsystem（自身无 console），第一次 AttachConsole 到
+// child 的 console 后 broadcast，console membership 注册有 race，前几次必 fail（A2
+// 验证：probe 单层 bun 也 fail，跟 cctra 多层无关）。
+// 新方案 GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pgid) 定向投递到 child 自己的
+// process group，不依赖 broadcast 时 console membership 是否稳定。
+// CTRL_BREAK 在 console 内是 always handled（不能被 SetConsoleCtrlHandler disable），
+// bun runtime 翻译成 SIGBREAK（已在 cctra 端装 SIGBREAK handler 处理 graceful cleanup）。
+// 仍需 AttachConsole 让 supervisor share child console（GenerateConsoleCtrlEvent 要求）。
 #[cfg(windows)]
-unsafe fn send_ctrl_c(pid: u32) -> bool {
+unsafe fn send_ctrl_break(pid: u32) -> bool {
     use windows_sys::Win32::System::Console::{
-        AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler, CTRL_C_EVENT,
+        AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler,
+        CTRL_BREAK_EVENT,
     };
     let _ = FreeConsole();
     if AttachConsole(pid) == 0 {
         return false;
     }
-    SetConsoleCtrlHandler(None, 1); // 1 = TRUE = 屏蔽自己的 handler
-    let ok = GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0) != 0;
-    // 必须 sleep 一会儿再 FreeConsole / 恢复 handler，否则会自杀
+    SetConsoleCtrlHandler(None, 1); // 1 = TRUE = 屏蔽自己的 handler 避免 supervisor 收到 break 自杀
+    let ok = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) != 0; // pid = pgid（CREATE_NEW_PROCESS_GROUP）
     std::thread::sleep(std::time::Duration::from_millis(100));
     SetConsoleCtrlHandler(None, 0); // 0 = FALSE = 恢复
     let _ = FreeConsole();
     ok
 }
 
-/// v0.4.4: 温柔 + 兜底杀 entry 的整棵进程树。
-/// 1) 温柔 Ctrl+C 触发 SIGINT handler（30s 等待 child 自己退）
+/// v0.4.15: 温柔 ctrl+break + 兜底杀 entry 的整棵进程树。
+/// 1) 温柔 CTRL_BREAK_EVENT 定向 child pgid 触发 SIGBREAK handler（5s 等待 child 自己退）
 /// 2) 兜底关 Job handle → OS 杀整个 Job 内所有进程（含 grandchild）
 /// 3) child.wait() reap 自己的 handle
 #[cfg(windows)]
 fn kill_tree_windows(rec: &mut ChildRecord, sup_log_path: &PathBuf) {
     let pid = rec.child.as_ref().and_then(|c| Some(c.id()));
 
-    // 1) 温柔 Ctrl+C（仅当 child 还活着）
-    let sent_ctrlc = pid.map(|p| unsafe { send_ctrl_c(p) }).unwrap_or(false);
-    if sent_ctrlc {
-        log_line(sup_log_path, &format!("sent Ctrl+C to pid={:?}", pid));
+    // 1) 温柔 CTRL_BREAK（仅当 child 还活着）
+    let sent = pid.map(|p| unsafe { send_ctrl_break(p) }).unwrap_or(false);
+    if sent {
+        log_line(sup_log_path, &format!("sent Ctrl+Break to pid={:?}", pid));
     }
 
-    // 2) 等 30s 看 child 自然退（轮询 try_wait，提早收工）
+    // 2) 等 GRACE_PERIOD_MS 看 child 自然退（轮询 try_wait，提早收工）
     let start = std::time::Instant::now();
     if let Some(child) = rec.child.as_mut() {
         while start.elapsed() < std::time::Duration::from_millis(GRACE_PERIOD_MS) {
