@@ -22,7 +22,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseTOML } from "confbox";
+import { parse } from "smol-toml";
 import { migrateToXdg } from "../src/migrate";
 
 // 关掉 XDG migration（这文件就是测 migration 本身的）
@@ -94,7 +94,7 @@ createdAt = "2026-01-01T00:00:00Z"
 
     const newEntries = join(newConfigHome, "svcctl", "entries.toml");
     expect(existsSync(newEntries)).toBe(true);
-    const data = parseTOML(readFileSync(newEntries, "utf-8")) as { version: number; entries: Array<{ name: string }> };
+    const data = parse(readFileSync(newEntries, "utf-8")) as { version: number; entries: Array<{ name: string }> };
     expect(data.version).toBe(2);
     expect(data.entries[0]?.name).toBe("test");
 

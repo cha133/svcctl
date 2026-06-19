@@ -1,4 +1,4 @@
-import { parseTOML, stringifyTOML } from "confbox";
+import { parse, stringify } from "smol-toml";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -19,7 +19,7 @@ export function loadEntriesAt(path: string = entriesTomlPath()): EntriesFile {
   try {
     const raw = readFileSync(path, "utf-8");
     if (raw.trim() === "") return emptyEntriesFile();
-    const parsed = parseTOML(raw) as Partial<EntriesFile>;
+    const parsed = parse(raw) as Partial<EntriesFile>;
     // 防御性：空 entries 字段也当空文件处理
     if (!parsed || !Array.isArray(parsed.entries)) return emptyEntriesFile();
     return {
@@ -40,7 +40,7 @@ export function saveEntriesAt(file: EntriesFile, path: string = entriesTomlPath(
   mkdirSync(dirname(path), { recursive: true });
   // 原子写：写到 tmp 再 rename 覆盖
   const tmp = join(tmpdir(), `svcctl-entries-${process.pid}-${Date.now()}.toml`);
-  writeFileSync(tmp, stringifyTOML(file), "utf-8");
+  writeFileSync(tmp, stringify(file), "utf-8");
   renameSync(tmp, path);
 }
 

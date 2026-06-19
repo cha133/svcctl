@@ -23,7 +23,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { parseTOML, stringifyTOML } from "confbox";
+import { parse, stringify } from "smol-toml";
 import { xdgConfigHome, xdgDataHome, xdgStateHome } from "./xdg";
 import { entriesTomlPath, logsDir, supervisorLogPath, windowsSupervisorPath } from "./paths";
 import { ENTRIES_VERSION } from "./entries/types";
@@ -82,7 +82,7 @@ function shouldSkip(): boolean {
 function readVersionFromDisk(entriesPath: string): number {
   if (!existsSync(entriesPath)) return 0;
   try {
-    const data = parseTOML(readFileSync(entriesPath, "utf-8")) as { version?: number };
+    const data = parse(readFileSync(entriesPath, "utf-8")) as { version?: number };
     return data.version ?? 0;
   } catch {
     return 0;
@@ -93,13 +93,13 @@ function bumpVersionOnDisk(entriesPath: string, version: number): void {
   if (!existsSync(entriesPath)) return;
   let data: Record<string, unknown>;
   try {
-    data = parseTOML(readFileSync(entriesPath, "utf-8")) as Record<string, unknown>;
+    data = parse(readFileSync(entriesPath, "utf-8")) as Record<string, unknown>;
   } catch {
     return;
   }
   data.version = version;
   const tmp = `${entriesPath}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tmp, stringifyTOML(data), "utf-8");
+  writeFileSync(tmp, stringify(data), "utf-8");
   renameSync(tmp, entriesPath);
 }
 
@@ -134,7 +134,7 @@ export function migrateToXdg(params: {
       // bump version
       bumpVersionOnDisk(join(newDir, "entries.toml"), 2);
       try {
-        parseTOML(readFileSync(join(newDir, "entries.toml"), "utf-8"));
+        parse(readFileSync(join(newDir, "entries.toml"), "utf-8"));
       } catch (e) {
         throw new Error(`migrated entries.toml is not valid TOML: ${(e as Error).message}`);
       }
@@ -148,7 +148,7 @@ export function migrateToXdg(params: {
       copyFileSync(oldConfig, join(newDir, "config.toml"));
       assertCopyMatches(oldConfig, join(newDir, "config.toml"));
       try {
-        parseTOML(readFileSync(join(newDir, "config.toml"), "utf-8"));
+        parse(readFileSync(join(newDir, "config.toml"), "utf-8"));
       } catch (e) {
         throw new Error(`migrated config.toml is not valid TOML: ${(e as Error).message}`);
       }

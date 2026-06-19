@@ -1,4 +1,4 @@
-import { parseTOML, stringifyTOML } from "confbox";
+import { parse, stringify } from "smol-toml";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir, homedir } from "node:os";
@@ -28,7 +28,7 @@ export function loadConfig(): Required<SvcctlConfig> {
   }
   try {
     const raw = readFileSync(path, "utf-8");
-    const parsed = parseTOML(raw) as SvcctlConfig;
+    const parsed = parse(raw) as SvcctlConfig;
     return { ...DEFAULT_CONFIG, ...parsed };
   } catch {
     // 解析失败退回默认值（不阻塞主流程）
@@ -42,7 +42,7 @@ export function saveConfig(config: SvcctlConfig): void {
   mkdirSync(dirname(path), { recursive: true });
   const merged: Required<SvcctlConfig> = { ...DEFAULT_CONFIG, ...config };
   const tmp = join(tmpdir(), `svcctl-config-${process.pid}-${Date.now()}.toml`);
-  writeFileSync(tmp, stringifyTOML(merged), "utf-8");
+  writeFileSync(tmp, stringify(merged), "utf-8");
   renameSync(tmp, path);
 }
 
