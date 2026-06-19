@@ -22,7 +22,7 @@ import { listEntries } from "../entries/store";
 import {
   isInstalled,
 } from "../install";
-import { logPath, supervisorLogPath, supervisorPidPath, svcctlDir } from "../paths";
+import { logPath, supervisorLogPath, supervisorPidPath, configTomlPath } from "../paths";
 import { bold, dim, error, green, info, kvRow, red, yellow } from "../format";
 import { checkSupervisorVersion, warnSupervisorOutdated } from "./helpers";
 import type { Command } from "commander";
@@ -116,7 +116,7 @@ function statusGlobal(): void {
   const supRunning = isPidAlive(supPid);
   const entries = listEntries();
 
-  console.log(`svcctl ${dim(`(${svcctlDir()})`)}`);
+  console.log(`svcctl ${dim(`(${configTomlPath()})`)}`);
   console.log(`  ${kvRow("installed", installed ? green("yes") : red("no"))}`);
 
   if (installed) {

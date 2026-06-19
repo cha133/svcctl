@@ -11,9 +11,8 @@
  * 5. SIGTERM / SIGINT 清理：杀所有子进程 + 删 pid 文件
  */
 import { watch } from "node:fs";
-import { join } from "node:path";
 import {
-  svcctlDir,
+  entriesTomlPath,
   supervisorPidPath,
   logPath,
   childrenJsonPath,
@@ -72,7 +71,7 @@ function killTree(proc: ChildProcess): Promise<void> {
 }
 
 export async function runSupervisor(): Promise<void> {
-  const dir = svcctlDir();
+  const entriesPath = entriesTomlPath();
   const pidPath = supervisorPidPath();
   writeFileSync(pidPath, String(process.pid));
   logger.info(`supervisor started (pid=${process.pid})`);
@@ -102,7 +101,6 @@ export async function runSupervisor(): Promise<void> {
 
   void reconcile();
 
-  const entriesPath = join(dir, "entries.toml");
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   try {
     watch(entriesPath, { persistent: true }, () => {

@@ -1,60 +1,61 @@
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { mkdirSync } from "node:fs";
+import { xdgConfigHome, xdgDataHome, xdgStateHome } from "./xdg";
 
-/** ~/.svcctl 根目录 */
-export function svcctlDir(): string {
-  return join(homedir(), ".svcctl");
-}
-
-/** ~/.svcctl/entries.toml 路径 */
+/** ~/.config/svcctl/entries.toml 路径 */
 export function entriesTomlPath(): string {
-  return join(svcctlDir(), "entries.toml");
+  return join(xdgConfigHome(), "svcctl", "entries.toml");
 }
 
-/** ~/.svcctl/config.toml 路径 */
+/** ~/.config/svcctl/config.toml 路径 */
 export function configTomlPath(): string {
-  return join(svcctlDir(), "config.toml");
+  return join(xdgConfigHome(), "svcctl", "config.toml");
 }
 
-/** ~/.svcctl/logs/ 目录 */
+/** ~/.local/state/svcctl/logs 目录 */
 export function logsDir(): string {
-  return join(svcctlDir(), "logs");
+  return join(xdgStateHome(), "svcctl", "logs");
 }
 
-/** ~/.svcctl/logs/<name>.log 路径 */
+/** ~/.local/state/svcctl/logs/<name>.log 路径 */
 export function logPath(name: string): string {
   return join(logsDir(), `${name}.log`);
 }
 
-/** ~/.svcctl/supervisor.log 路径（supervisor 自身日志） */
+/** ~/.local/state/svcctl/supervisor.log 路径（supervisor 自身日志） */
 export function supervisorLogPath(): string {
-  return join(svcctlDir(), "supervisor.log");
+  return join(xdgStateHome(), "svcctl", "supervisor.log");
 }
 
-/** ~/.svcctl/supervisor.pid 路径 */
+/** ~/.local/state/svcctl/supervisor.pid 路径 */
 export function supervisorPidPath(): string {
-  return join(svcctlDir(), "supervisor.pid");
+  return join(xdgStateHome(), "svcctl", "supervisor.pid");
 }
 
-/** ~/.svcctl/children.json 路径（Windows 用） */
+/** ~/.local/state/svcctl/children.json 路径（Windows 用） */
 export function childrenJsonPath(): string {
-  return join(svcctlDir(), "children.json");
+  return join(xdgStateHome(), "svcctl", "children.json");
 }
 
-/** ~/.svcctl/installed.flag 路径（首次 add 后写） */
+/** ~/.local/state/svcctl/installed.flag 路径（首次 add 后写） */
 export function installedFlagPath(): string {
-  return join(svcctlDir(), "installed.flag");
+  return join(xdgStateHome(), "svcctl", "installed.flag");
 }
 
-/** ~/.svcctl/control.json 路径（CLI ↔ supervisor IPC） */
+/** ~/.local/state/svcctl/control.json 路径（CLI ↔ supervisor IPC） */
 export function controlJsonPath(): string {
-  return join(svcctlDir(), "control.json");
+  return join(xdgStateHome(), "svcctl", "control.json");
 }
 
-/** Windows: ~/.svcctl/bin/SvcCtl.exe */
+/**
+ * Windows: ~/.local/share/svcctl/bin/SvcCtl.exe
+ *
+ * 放 XDG_DATA_HOME 下、不在 $PATH 上——绝不放 ~/.local/bin（Linux freedesktop 里这个
+ * dir 在 PATH，会污染命令命名空间）。supervisor 升级时由 install/windows.ts 走
+ * stop → copyFileSync → start 路径替换（svcctl v0.4.13 修过 NTFS lock）。
+ */
 export function windowsSupervisorPath(): string {
-  return join(svcctlDir(), "bin", "SvcCtl.exe");
+  return join(xdgDataHome(), "svcctl", "bin", "SvcCtl.exe");
 }
 
 /** 确保目录存在 */
@@ -62,9 +63,9 @@ export function ensureDir(dir: string): void {
   mkdirSync(dir, { recursive: true });
 }
 
-/** 确保 ~/.svcctl 存在 */
+/** 确保 ~/.config/svcctl 存在 */
 export function ensureSvcctlDir(): void {
-  ensureDir(svcctlDir());
+  ensureDir(join(xdgConfigHome(), "svcctl"));
 }
 
 /** 确保 logs/ 存在 */

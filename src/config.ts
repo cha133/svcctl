@@ -1,7 +1,8 @@
 import { parseTOML, stringifyTOML } from "confbox";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { configTomlPath, svcctlDir } from "./paths";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { tmpdir, homedir } from "node:os";
+import { configTomlPath } from "./paths";
 
 /** 全局配置 shape */
 export interface SvcctlConfig {
@@ -35,15 +36,17 @@ export function loadConfig(): Required<SvcctlConfig> {
   }
 }
 
-/** 写 ~/.svcctl/config.toml（原子写） */
+/** 写 ~/.config/svcctl/config.toml（原子写：tmp + rename） */
 export function saveConfig(config: SvcctlConfig): void {
   const path = configTomlPath();
   mkdirSync(dirname(path), { recursive: true });
   const merged: Required<SvcctlConfig> = { ...DEFAULT_CONFIG, ...config };
-  writeFileSync(path, stringifyTOML(merged), "utf-8");
+  const tmp = join(tmpdir(), `svcctl-config-${process.pid}-${Date.now()}.toml`);
+  writeFileSync(tmp, stringifyTOML(merged), "utf-8");
+  renameSync(tmp, path);
 }
 
 /** 拿到 home dir（logDir 展开用） */
 export function homeDir(): string {
-  return svcctlDir().replace(/[\\/][^\\/]+$/, ""); // 取父目录即 homedir()
+  return homedir();
 }

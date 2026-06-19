@@ -29,7 +29,7 @@ export interface EntriesFile {
   entries: Entry[];
 }
 
-export const ENTRIES_VERSION = 1;
+export const ENTRIES_VERSION = 2;
 
 /** 空文件默认值 */
 export function emptyEntriesFile(): EntriesFile {

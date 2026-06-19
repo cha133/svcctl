@@ -27,7 +27,7 @@ svcctl status
 
 ### Manual vs auto vs auto-restart
 
-Each entry has two independent knobs in `~/.svcctl/entries.toml`:
+Each entry has two independent knobs in `~/.config/svcctl/entries.toml`:
 
 | Field      | Default | Meaning                                                    |
 |------------|---------|------------------------------------------------------------|
@@ -42,7 +42,7 @@ Each entry has two independent knobs in `~/.svcctl/entries.toml`:
 
 ## How it works
 
-svcctl installs **one** OS-level autostart item (HKCU\Run on Windows, LaunchAgent on macOS, systemd user unit on Linux) that runs a **supervisor process**. The supervisor reads `~/.svcctl/entries.toml` and launches all added commands at boot, redirecting each command's stdout/stderr to `~/.svcctl/logs/<name>.log`.
+svcctl installs **one** OS-level autostart item (HKCU\Run on Windows, LaunchAgent on macOS, systemd user unit on Linux) that runs a **supervisor process**. The supervisor reads `~/.config/svcctl/entries.toml` and launches all added commands at boot, redirecting each command's stdout/stderr to `~/.local/state/svcctl/logs/<name>.log`.
 
 Adding or removing entries **hot-reloads** the supervisor — no restart needed:
 - macOS / Linux: `fs.watch` on entries.toml (event-driven, < 100ms)

@@ -22,31 +22,45 @@ const describeWin = isWin ? describe : describe.skip;
 
 describeWin("upgradeWindowsSupervisor", () => {
   let tempHome: string;
+  let tempXdgRoot: string;
   let originalUserProfile: string | undefined;
+  let originalXdgData: string | undefined;
   let bundledPath: string;
   let realSvcCtl: string;
+  // v0.5.0+：SvcCtl.exe 搬到 ~/.local/share/svcctl/bin/SvcCtl.exe
+  // (即 $XDG_DATA_HOME/svcctl/bin/SvcCtl.exe)
+  let newDest: string;
 
   beforeEach(() => {
     originalUserProfile = process.env.USERPROFILE;
-    tempHome = mkdtempSync(join(tmpdir(), "svcctl-upgrade-test-"));
+    originalXdgData = process.env.XDG_DATA_HOME;
+    tempHome = mkdtempSync(join(tmpdir(), "svcctl-upgrade-test-home-"));
+    tempXdgRoot = mkdtempSync(join(tmpdir(), "svcctl-upgrade-test-xdg-"));
     process.env.USERPROFILE = tempHome;
     process.env.HOMEDRIVE = tempHome[0] + ":";
+    // v0.5.0+ XDG 路径：x dgDataHome() = $XDG_DATA_HOME → tempXdgRoot
+    process.env.XDG_DATA_HOME = tempXdgRoot;
 
-    const svcctlDir = join(tempHome, ".svcctl");
-    const binDir = join(svcctlDir, "bin");
-    mkdirSync(binDir, { recursive: true });
+    // 提前建好 XDG 路径下的 bin/，让 upgradeWindowsSupervisor 直接写到目标
+    const newBin = join(tempXdgRoot, "svcctl", "bin");
+    mkdirSync(newBin, { recursive: true });
+    newDest = join(newBin, "SvcCtl.exe");
+
     // 不写 supervisor.pid：supervisorRunning = false（直接 copy 路径）
 
     // bundled + dest 都用真 bin/SvcCtl.exe（PE FileVersion = currentVersion）
     realSvcCtl = realpathSync(join(import.meta.dir, "..", "bin", "SvcCtl.exe"));
     bundledPath = join(tempHome, "bundled-SvcCtl.exe");
     copyFileSync(realSvcCtl, bundledPath);
-    copyFileSync(realSvcCtl, join(binDir, "SvcCtl.exe"));
+    copyFileSync(realSvcCtl, newDest);
   });
 
   afterEach(() => {
     process.env.USERPROFILE = originalUserProfile;
+    if (originalXdgData === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = originalXdgData;
     try { rmSync(tempHome, { recursive: true, force: true }); } catch {}
+    try { rmSync(tempXdgRoot, { recursive: true, force: true }); } catch {}
   });
 
   test("version matches (PE FileVersion == currentVersion) → up-to-date", async () => {
@@ -57,18 +71,16 @@ describeWin("upgradeWindowsSupervisor", () => {
 
   test("dest 不存在 → upgraded (copyFileSync bundled → dest)", async () => {
     const { upgradeWindowsSupervisor } = await import("../src/install/windows");
-    const dest = join(tempHome, ".svcctl", "bin", "SvcCtl.exe");
-    rmSync(dest);
+    rmSync(newDest);
     const result = await upgradeWindowsSupervisor(bundledPath);
     expect(result).toBe("upgraded");
-    expect(existsSync(dest)).toBe(true);
+    expect(existsSync(newDest)).toBe(true);
   });
 
   test("dest 跟 bundled PE version 一致但 dest 不存在 → upgraded", async () => {
     // v0.4.13 简化的核心：caller 保证 dest 没锁，upgradeWindowsSupervisor 直接 copy
     const { upgradeWindowsSupervisor } = await import("../src/install/windows");
-    const dest = join(tempHome, ".svcctl", "bin", "SvcCtl.exe");
-    rmSync(dest);
+    rmSync(newDest);
     const result = await upgradeWindowsSupervisor(bundledPath);
     expect(result).toBe("upgraded");
   });
