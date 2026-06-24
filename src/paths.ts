@@ -72,3 +72,8 @@ export function ensureSvcctlDir(): void {
 export function ensureLogsDir(): void {
   ensureDir(logsDir());
 }
+
+/** 确保 ~/.local/state/svcctl 存在（installed.flag / supervisor.pid / control.json 等的家） */
+export function ensureStateDir(): void {
+  ensureDir(join(xdgStateHome(), "svcctl"));
+}

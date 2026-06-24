@@ -5,7 +5,7 @@ import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { supervisorLogPath, installedFlagPath } from "../paths";
+import { supervisorLogPath, installedFlagPath, ensureStateDir } from "../paths";
 import { info } from "../format";
 
 const PLIST_LABEL = "com.svcctl.supervisor";
@@ -48,6 +48,7 @@ export function installMacOS(opts: MacOSInstallOptions): void {
     info(`bootstrapped ${PLIST_LABEL}`);
   }
 
+  ensureStateDir();
   writeFileSync(installedFlagPath(), plistFile, "utf-8");
 }
 

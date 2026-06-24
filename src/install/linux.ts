@@ -5,7 +5,7 @@ import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { supervisorLogPath, installedFlagPath } from "../paths";
+import { supervisorLogPath, installedFlagPath, ensureStateDir } from "../paths";
 import { info } from "../format";
 
 const UNIT_NAME = "svcctl.service";
@@ -40,6 +40,7 @@ export function installLinux(opts: LinuxInstallOptions): void {
     throw new Error(`systemctl failed: ${(e as Error).message}`);
   }
 
+  ensureStateDir();
   writeFileSync(installedFlagPath(), unitFile, "utf-8");
 }
 

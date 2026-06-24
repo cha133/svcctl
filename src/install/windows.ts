@@ -5,7 +5,7 @@ import { execSync } from "node:child_process";
 import { copyFileSync, existsSync, writeFileSync, unlinkSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureSvcctlDir, windowsSupervisorPath, installedFlagPath, ensureDir } from "../paths";
+import { ensureSvcctlDir, windowsSupervisorPath, installedFlagPath, ensureDir, ensureStateDir } from "../paths";
 import { info, warn } from "../format";
 import { readExeVersion, normalizeVersion } from "./exe-version";
 
@@ -33,15 +33,10 @@ export function installWindows(bundledSupervisorPath: string): void {
   info(`copied supervisor to ${dest}`);
 
   // 写注册表
-  const cmd = `reg add "${REG_KEY}" /v ${REG_NAME} /t REG_SZ /d "\\"${dest}\\"" /f`;
-  try {
-    execSync(cmd, { stdio: "pipe" });
-    info(`registered ${REG_NAME} in ${REG_KEY}`);
-  } catch (e) {
-    throw new Error(`Failed to register Run key: ${(e as Error).message}`);
-  }
+  setWindowsRunKey(dest);
 
   // 写 installed.flag
+  ensureStateDir();
   writeFileSync(installedFlagPath(), dest, "utf-8");
 
   // v0.4.11: 删 supervisor.version 文件 —— PE FileVersion 是 ground truth
@@ -51,12 +46,7 @@ export function installWindows(bundledSupervisorPath: string): void {
 export function uninstallWindows(): void {
   if (process.platform !== "win32") return;
 
-  try {
-    execSync(`reg delete "${REG_KEY}" /v ${REG_NAME} /f`, { stdio: "pipe" });
-    info(`removed ${REG_NAME} from ${REG_KEY}`);
-  } catch {
-    // 没注册过，跳过
-  }
+  removeWindowsRunKey();
 
   const dest = windowsSupervisorPath();
   if (existsSync(dest)) {
@@ -73,6 +63,27 @@ export function uninstallWindows(): void {
     try {
       unlinkSync(installedFlagPath());
     } catch {}
+  }
+}
+
+/** 写 HKCU\Run（测试可 mock） */
+export function setWindowsRunKey(dest: string): void {
+  const cmd = `reg add "${REG_KEY}" /v ${REG_NAME} /t REG_SZ /d "\\"${dest}\\"" /f`;
+  try {
+    execSync(cmd, { stdio: "pipe" });
+    info(`registered ${REG_NAME} in ${REG_KEY}`);
+  } catch (e) {
+    throw new Error(`Failed to register Run key: ${(e as Error).message}`);
+  }
+}
+
+/** 删 HKCU\Run（没注册过不抛） */
+export function removeWindowsRunKey(): void {
+  try {
+    execSync(`reg delete "${REG_KEY}" /v ${REG_NAME} /f`, { stdio: "pipe" });
+    info(`removed ${REG_NAME} from ${REG_KEY}`);
+  } catch {
+    // 没注册过，跳过
   }
 }
 
