@@ -101,10 +101,15 @@ describeWin("installWindows — 全新 install 路径", () => {
 
   test("installWindows: 写 supervisor + 调 setRunKey + 写 installed.flag 不抛", async () => {
     const { installWindows } = await import("../src/install/windows");
-    const { windowsSupervisorPath, installedFlagPath } = await import("../src/paths");
+    const {
+      windowsSupervisorPath,
+      windowsSupervisorWrapperPath,
+      installedFlagPath,
+    } = await import("../src/paths");
 
-    const expectedExe = windowsSupervisorPath(); // = XDG_DATA_HOME/svcctl/bin/SvcCtl.exe
-    const expectedFlag = installedFlagPath();    // = XDG_STATE_HOME/svcctl/installed.flag
+    const expectedExe = windowsSupervisorPath();           // = XDG_DATA_HOME/svcctl/bin/SvcCtl.exe
+    const expectedWrapper = windowsSupervisorWrapperPath(); // = XDG_DATA_HOME/svcctl/bin/svcctl-supervisor.cmd
+    const expectedFlag = installedFlagPath();              // = XDG_STATE_HOME/svcctl/installed.flag
 
     expect(existsSync(expectedExe)).toBe(false);
     expect(existsSync(expectedFlag)).toBe(false);
@@ -113,32 +118,45 @@ describeWin("installWindows — 全新 install 路径", () => {
     expect(() => installWindows(bundledPath)).not.toThrow();
 
     expect(existsSync(expectedExe)).toBe(true);
+    expect(existsSync(expectedWrapper)).toBe(true); // v0.5.2: wrapper 跟 .exe 同目录
     expect(existsSync(expectedFlag)).toBe(true);
 
-    // reg helper 都被调过（mock 但记录 call count）
+    // v0.5.2: 注册表指向 wrapper（不是裸 .exe），boot 启动时 wrapper 设 XDG env
     expect(setRunKeySpy!.mock.calls.length).toBe(1);
-    expect(setRunKeySpy!.mock.calls[0]?.[0]).toBe(expectedExe);
+    expect(setRunKeySpy!.mock.calls[0]?.[0]).toBe(expectedWrapper);
+
+    // wrapper 内容包含 XDG env 设定
+    const wrapperContent = readFileSync(expectedWrapper, "utf-8");
+    expect(wrapperContent).toContain("XDG_STATE_HOME");
+    expect(wrapperContent).toContain("XDG_CONFIG_HOME");
 
     // installed.flag 内容 = supervisor 路径（跟其他平台约定一致）
     const flagContent = readFileSync(expectedFlag, "utf-8");
     expect(flagContent).toBe(expectedExe);
   });
 
-  test("uninstallWindows: 调 removeRunKey + 删 installed.flag + 删 .exe", async () => {
+  test("uninstallWindows: 调 removeRunKey + 删 installed.flag + 删 .exe + 删 wrapper", async () => {
     const { installWindows, uninstallWindows } = await import("../src/install/windows");
-    const { windowsSupervisorPath, installedFlagPath } = await import("../src/paths");
+    const {
+      windowsSupervisorPath,
+      windowsSupervisorWrapperPath,
+      installedFlagPath,
+    } = await import("../src/paths");
 
     installWindows(bundledPath);
     const expectedExe = windowsSupervisorPath();
+    const expectedWrapper = windowsSupervisorWrapperPath();
     const expectedFlag = installedFlagPath();
     expect(existsSync(expectedFlag)).toBe(true);
     expect(existsSync(expectedExe)).toBe(true);
+    expect(existsSync(expectedWrapper)).toBe(true);
 
     uninstallWindows();
 
     expect(removeRunKeySpy!.mock.calls.length).toBe(1);
     expect(existsSync(expectedFlag)).toBe(false);
     expect(existsSync(expectedExe)).toBe(false);
+    expect(existsSync(expectedWrapper)).toBe(false);
   });
 
   test("重复 installWindows: 不重建已存在的目录也不报错", async () => {

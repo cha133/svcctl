@@ -58,6 +58,17 @@ export function windowsSupervisorPath(): string {
   return join(xdgDataHome(), "svcctl", "bin", "SvcCtl.exe");
 }
 
+/**
+ * v0.5.2: Windows boot wrapper，HKCU\Run 注册这个 .cmd 而不是裸 .exe。
+ *
+ * 为什么不直接注册 .exe：Windows boot 启动不传 env，supervisor 拿不到 XDG_*
+ * 就 fallback 到 ~/.svcctl/，跟 v0.5.0+ 的 XDG 路径错位 → `svcctl start` 永远 5s 超时。
+ * wrapper 显式 set XDG env（默认值用 %USERPROFILE%）再 exec SvcCtl.exe。
+ */
+export function windowsSupervisorWrapperPath(): string {
+  return join(xdgDataHome(), "svcctl", "bin", "svcctl-supervisor.cmd");
+}
+
 /** 确保目录存在 */
 export function ensureDir(dir: string): void {
   mkdirSync(dir, { recursive: true });

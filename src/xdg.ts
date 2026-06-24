@@ -33,3 +33,22 @@ export function xdgStateHome(): string {
 export function xdgCacheHome(): string {
   return xdgHome("XDG_CACHE_HOME", ".cache");
 }
+
+/**
+ * v0.5.2: XDG_STATE_HOME 原值（env 或 homedir-based 默认），不带 /svcctl 后缀。
+ *
+ * 给 Rust supervisor 用 —— Rust 端 locate_svcctl_paths() 自己会拼 /svcctl，
+ * 跟 JS 这边的 `xdgStateHome() + "/svcctl/..."` 路径完全一致。
+ */
+export function xdgStateHomeRaw(): string {
+  return xdgHome("XDG_STATE_HOME", join(".local", "state"));
+}
+
+/**
+ * v0.5.2: XDG_CONFIG_HOME 原值（env 或 homedir-based 默认），不带 /svcctl 后缀。
+ *
+ * 给 Rust supervisor 用 —— Rust 端 locate_svcctl_paths() 自己会拼 /svcctl/entries.toml。
+ */
+export function xdgConfigHomeRaw(): string {
+  return xdgHome("XDG_CONFIG_HOME", ".config");
+}
