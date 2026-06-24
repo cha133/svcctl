@@ -9,7 +9,6 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { windowsSupervisorPath, supervisorPidPath, supervisorLogPath } from "../paths";
-import { xdgStateHomeRaw, xdgConfigHomeRaw } from "../xdg";
 import { findEntry, EntryNotFoundError, EntryAmbiguousError } from "../entries/match";
 import { success, error, info } from "../format";
 import { isInstalled } from "../install";
@@ -86,20 +85,12 @@ function startWindows(): void {
     error(`supervisor not found: ${sup}`);
     process.exit(1);
   }
-  // v0.5.2: 透传 XDG env，让 Rust supervisor 写到正确路径
-  // （JS 端 supervisor.pid / supervisor.log 在 XDG_STATE_HOME/svcctl/，
-  //  entries.toml 在 XDG_CONFIG_HOME/svcctl/，supervisor 必须知道这些）。
-  // 不传的话 Rust 会 fallback 到 ~/.svcctl/，跟 JS 端路径对不上 → 5s 超时。
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    XDG_STATE_HOME: xdgStateHomeRaw(),
-    XDG_CONFIG_HOME: xdgConfigHomeRaw(),
-  };
+  // v0.5.4: Windows 路径在 Rust `locate_svcctl_paths()` Windows 分支里硬编码从
+  // %USERPROFILE% 推（不读 XDG env），所以直接用 process.env spawn 就行，不用透传。
   const child = spawn(sup, [], {
     detached: true,
     stdio: "ignore",
     windowsHide: true,
-    env,
   });
   child.unref();
 }

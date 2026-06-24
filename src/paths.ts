@@ -53,20 +53,13 @@ export function controlJsonPath(): string {
  * 放 XDG_DATA_HOME 下、不在 $PATH 上——绝不放 ~/.local/bin（Linux freedesktop 里这个
  * dir 在 PATH，会污染命令命名空间）。supervisor 升级时由 install/windows.ts 走
  * stop → copyFileSync → start 路径替换（svcctl v0.4.13 修过 NTFS lock）。
+ *
+ * v0.5.4: HKCU\Run 直接注册这个 .exe（删了 v0.5.2-v0.5.3 那个 XDG env wrapper .cmd）。
+ * 路径写死在 Rust supervisor 的 locate_svcctl_paths() Windows 分支里，boot 启动时
+ * 没有 env 也能写到正确的 XDG 风格目录。
  */
 export function windowsSupervisorPath(): string {
   return join(xdgDataHome(), "svcctl", "bin", "SvcCtl.exe");
-}
-
-/**
- * v0.5.2: Windows boot wrapper，HKCU\Run 注册这个 .cmd 而不是裸 .exe。
- *
- * 为什么不直接注册 .exe：Windows boot 启动不传 env，supervisor 拿不到 XDG_*
- * 就 fallback 到 ~/.svcctl/，跟 v0.5.0+ 的 XDG 路径错位 → `svcctl start` 永远 5s 超时。
- * wrapper 显式 set XDG env（默认值用 %USERPROFILE%）再 exec SvcCtl.exe。
- */
-export function windowsSupervisorWrapperPath(): string {
-  return join(xdgDataHome(), "svcctl", "bin", "svcctl-supervisor.cmd");
 }
 
 /** 确保目录存在 */

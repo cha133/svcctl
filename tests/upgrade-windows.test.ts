@@ -22,27 +22,21 @@ const describeWin = isWin ? describe : describe.skip;
 
 describeWin("upgradeWindowsSupervisor", () => {
   let tempHome: string;
-  let tempXdgRoot: string;
   let originalUserProfile: string | undefined;
-  let originalXdgData: string | undefined;
   let bundledPath: string;
   let realSvcCtl: string;
-  // v0.5.0+：SvcCtl.exe 搬到 ~/.local/share/svcctl/bin/SvcCtl.exe
-  // (即 $XDG_DATA_HOME/svcctl/bin/SvcCtl.exe)
+  // v0.5.4: Windows 上 windowsSupervisorPath() = homedir()/.local/share/svcctl/bin/SvcCtl.exe
+  // (Windows 不再读 XDG_DATA_HOME，路径在 Rust 端 hardcode)
   let newDest: string;
 
   beforeEach(() => {
     originalUserProfile = process.env.USERPROFILE;
-    originalXdgData = process.env.XDG_DATA_HOME;
     tempHome = mkdtempSync(join(tmpdir(), "svcctl-upgrade-test-home-"));
-    tempXdgRoot = mkdtempSync(join(tmpdir(), "svcctl-upgrade-test-xdg-"));
     process.env.USERPROFILE = tempHome;
     process.env.HOMEDRIVE = tempHome[0] + ":";
-    // v0.5.0+ XDG 路径：x dgDataHome() = $XDG_DATA_HOME → tempXdgRoot
-    process.env.XDG_DATA_HOME = tempXdgRoot;
 
-    // 提前建好 XDG 路径下的 bin/，让 upgradeWindowsSupervisor 直接写到目标
-    const newBin = join(tempXdgRoot, "svcctl", "bin");
+    // 提前建好 bin/，让 upgradeWindowsSupervisor 直接写到目标
+    const newBin = join(tempHome, ".local", "share", "svcctl", "bin");
     mkdirSync(newBin, { recursive: true });
     newDest = join(newBin, "SvcCtl.exe");
 
@@ -57,10 +51,7 @@ describeWin("upgradeWindowsSupervisor", () => {
 
   afterEach(() => {
     process.env.USERPROFILE = originalUserProfile;
-    if (originalXdgData === undefined) delete process.env.XDG_DATA_HOME;
-    else process.env.XDG_DATA_HOME = originalXdgData;
     try { rmSync(tempHome, { recursive: true, force: true }); } catch {}
-    try { rmSync(tempXdgRoot, { recursive: true, force: true }); } catch {}
   });
 
   test("version matches (PE FileVersion == currentVersion) → up-to-date", async () => {

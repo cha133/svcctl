@@ -68,7 +68,13 @@ afterEach(() => {
   else process.env.HOME = savedHome;
 });
 
-describe("migrateToXdg", () => {
+// v0.5.4: Windows 不再兼容 ~/.svcctl（路径定死在 %USERPROFILE%/.local/state 等），
+// XDG 迁移是 Mac/Linux 概念。Windows 上 logsDir / supervisorLogPath / windowsSupervisorPath
+// 不读 XDG_*_HOME env，所以这个测试在 Windows 上跑没意义。
+const isWin = process.platform === "win32";
+const describeSkipWin = isWin ? describe.skip : describe;
+
+describeSkipWin("migrateToXdg", () => {
   test("全新 install：~/.svcctl/ 不存在 → no-op", () => {
     migrateToXdg({ oldHome, newConfigHome, newDataHome, newStateHome });
     expect(existsSync(join(newConfigHome, "svcctl"))).toBe(false);

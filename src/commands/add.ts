@@ -111,7 +111,6 @@ export async function addCommand(commandArgs: string[], opts: AddOptions): Promi
   }
 
   // 6. 如果 supervisor 在跑，热重载会自动接管（fs.watch / mtime 合并到 reap）
-  // v0.5.2: 路径修正 —— 实际写到 XDG_CONFIG_HOME/svcctl/entries.toml（不是 ~/.svcctl/）
   info(`entry persisted to ${entriesTomlPath()}. Supervisor will pick it up automatically.`);
 }
 
