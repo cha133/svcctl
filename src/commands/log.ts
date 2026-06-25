@@ -15,7 +15,7 @@ import {
   EntryNotFoundError,
   EntryAmbiguousError,
 } from "../entries/match";
-import { dim, error, green, info, red, yellow } from "../format";
+import { dim, error, formatLocalTime, green, info, red, yellow } from "../format";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Command } from "commander";
@@ -166,7 +166,7 @@ function listLogs(): void {
     const status =
       ageSec < 60 ? green("running") : ageSec < 3600 ? yellow("idle") : red("stopped");
     const sizeKB = (stat.size / 1024).toFixed(1) + " KB";
-    const mtime = new Date(stat.mtimeMs).toISOString().slice(0, 16).replace("T", " ");
+    const mtime = formatLocalTime(stat.mtimeMs);
     console.log(
       `${n.padEnd(20)}  ${status.padEnd(10)}  ${p.padEnd(50)}  ${sizeKB.padEnd(9)}  ${mtime}`
     );

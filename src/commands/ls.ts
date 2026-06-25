@@ -4,7 +4,7 @@
  */
 import { listEntries } from "../entries/store";
 import { entryState } from "../entries/match";
-import { dim, green, red, yellow } from "../format";
+import { dim, formatLocalTime, green, red, yellow } from "../format";
 import type { Command } from "commander";
 
 export function lsCommand(): void {
@@ -29,7 +29,7 @@ export function lsCommand(): void {
       state === "running" ? green("running") : state === "stopped" ? red("stopped") : yellow("never");
     const startup = e.startup === false ? yellow("manual") : dim("auto");
     const restart = e.restart === true ? green("yes") : dim("no");
-    const added = new Date(e.createdAt).toISOString().slice(0, 16).replace("T", " ");
+    const added = formatLocalTime(e.createdAt);
     console.log(
       `${e.name.padEnd(nameW)}  ${e.command.padEnd(cmdW)}  ${argsStr}  ${status.padEnd(10)}  ${startup.padEnd(7)}  ${restart.padEnd(7)}  ${added}`
     );

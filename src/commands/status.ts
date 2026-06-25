@@ -23,7 +23,7 @@ import {
   isInstalled,
 } from "../install";
 import { logPath, supervisorLogPath, supervisorPidPath, configTomlPath } from "../paths";
-import { bold, dim, error, green, info, kvRow, red, yellow } from "../format";
+import { bold, dim, error, formatLocalTime, green, info, kvRow, red, reformatSupervisorLogLine, yellow } from "../format";
 import { checkSupervisorVersion, warnSupervisorOutdated } from "./helpers";
 import type { Command } from "commander";
 
@@ -62,7 +62,7 @@ async function statusEntry(query: string): Promise<void> {
       console.log(kvRow(`env.${k}`, v));
     }
   }
-  console.log(kvRow("created", entry.createdAt));
+  console.log(kvRow("created", formatLocalTime(entry.createdAt)));
   console.log(kvRow("startup", entry.startup === false ? yellow("manual") : dim("auto (boot)")));
   // v0.4.7: opt-in auto-restart 状态
   console.log(kvRow("restart", entry.restart === true ? green("yes (opt-in)") : dim("no")));
@@ -94,7 +94,7 @@ async function statusEntry(query: string): Promise<void> {
   if (mentions.length) {
     console.log();
     console.log(dim(`── supervisor.log mentions of "${entry.name}" ──`));
-    for (const l of mentions) console.log(`  ${l}`);
+    for (const l of mentions) console.log(`  ${reformatSupervisorLogLine(l)}`);
   }
 
   // 5) 底部 hint（如果 supervisor 没在跑）
@@ -158,7 +158,7 @@ function statusGlobal(): void {
       console.log(
         dim(`── last ${lines.length} lines of ${supervisorLogPath()} ──`)
       );
-      for (const l of lines) console.log(`  ${l}`);
+      for (const l of lines) console.log(`  ${reformatSupervisorLogLine(l)}`);
     }
   }
 
