@@ -1,5 +1,8 @@
 /**
  * Linux: 写 ~/.config/systemd/user/svcctl.service + systemctl --user enable --now
+ *
+ * v0.5.5: 不再设 SVCCTL_HOME env；supervisor 路径从 homedir() 硬编码推，
+ * systemd --user 启动时 env 空也能写到正确位置。
  */
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
@@ -27,7 +30,7 @@ export function installLinux(opts: LinuxInstallOptions): void {
 
   const userDir = join(opts.homeDir ?? homedir(), ".config", "systemd", "user");
   mkdirSync(userDir, { recursive: true });
-  const unit = generateUnit(opts.cliPath, opts.homeDir);
+  const unit = generateUnit(opts.cliPath);
   const unitFile = unitPath();
   writeFileSync(unitFile, unit, "utf-8");
   info(`wrote unit to ${unitFile}`);
@@ -69,8 +72,8 @@ export function isInstalledLinux(): boolean {
   return process.platform === "linux" && existsSync(unitPath());
 }
 
-function generateUnit(cliPath: string, homeDir?: string): string {
-  const home = homeDir ?? homedir();
+/** @internal — exported for tests */
+export function generateUnit(cliPath: string): string {
   const log = supervisorLogPath();
   return `[Unit]
 Description=svcctl supervisor
@@ -78,7 +81,6 @@ After=network.target
 
 [Service]
 Type=simple
-Environment=SVCCTL_HOME=${home}/.svcctl
 ExecStart=/usr/bin/env bun run ${cliPath} _supervise
 Restart=always
 RestartSec=3

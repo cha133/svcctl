@@ -32,7 +32,6 @@ afterEach(() => {
 describe("manual entry schema (startup: false)", () => {
   test("写入 entries.toml → 读出 startup === false", () => {
     const written = {
-      version: 1,
       entries: [
         {
           name: "cctra-serve",

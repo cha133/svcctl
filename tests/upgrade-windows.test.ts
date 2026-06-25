@@ -25,8 +25,8 @@ describeWin("upgradeWindowsSupervisor", () => {
   let originalUserProfile: string | undefined;
   let bundledPath: string;
   let realSvcCtl: string;
-  // v0.5.4: Windows 上 windowsSupervisorPath() = homedir()/.local/share/svcctl/bin/SvcCtl.exe
-  // (Windows 不再读 XDG_DATA_HOME，路径在 Rust 端 hardcode)
+  // v0.5.5: 全平台 windowsSupervisorPath() = homedir()/.local/share/svcctl/bin/SvcCtl.exe
+  // (全平台不再读 XDG_*_HOME，路径在 Rust 端 hardcode 自 homedir()/.local/share/svcctl/bin)
   let newDest: string;
 
   beforeEach(() => {

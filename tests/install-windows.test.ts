@@ -3,12 +3,14 @@
  *
  * 关键约束：
  * 1. 仅 Windows（process.platform === "win32"）
- * 2. XDG_* env 指向空 temp dir（全新 install 模拟）
+ * 2. USERPROFILE / HOMEDRIVE 指向空 temp dir（全新 install 模拟）
  * 3. mock 掉 setWindowsRunKey/removeWindowsRunKey——不污染真注册表
  * 4. bundled = 真 bin/SvcCtl.exe（upgrade-windows.test.ts 同款 trick）
  *
- * 之前 bug：writeFileSync(installedFlagPath(),...) 没建 XDG_STATE_HOME/svcctl/ 父目录
+ * 之前 bug：writeFileSync(installedFlagPath(),...) 没建 homedir()/.local/state/svcctl/ 父目录
  *          → fresh box 上 ENOENT。现在 installWindows 在写 flag 前调 ensureStateDir()。
+ *
+ * v0.5.5: 全平台路径 hardcode 自 homedir()/.local/state/svcctl，删 XDG env 注入。
  */
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
@@ -23,24 +25,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// 关掉 XDG migration（这文件只测 install 本身）
-process.env.SVCCTL_NO_MIGRATE = "1";
-
 const isWin = process.platform === "win32";
 const describeWin = isWin ? describe : describe.skip;
 
 describeWin("installWindows — 全新 install 路径", () => {
   let tempHome: string;
-  let tempXdgRoot: string;
-  let tempConfigHome: string;
-  let tempDataHome: string;
-  let tempStateHome: string;
 
   let savedUserProfile: string | undefined;
   let savedHomeDrive: string | undefined;
-  let savedXdgConfig: string | undefined;
-  let savedXdgData: string | undefined;
-  let savedXdgState: string | undefined;
 
   let bundledPath: string;
   let realSvcCtl: string;
@@ -50,21 +42,10 @@ describeWin("installWindows — 全新 install 路径", () => {
   beforeEach(async () => {
     savedUserProfile = process.env.USERPROFILE;
     savedHomeDrive = process.env.HOMEDRIVE;
-    savedXdgConfig = process.env.XDG_CONFIG_HOME;
-    savedXdgData = process.env.XDG_DATA_HOME;
-    savedXdgState = process.env.XDG_STATE_HOME;
 
     tempHome = mkdtempSync(join(tmpdir(), "svcctl-install-test-home-"));
-    tempXdgRoot = mkdtempSync(join(tmpdir(), "svcctl-install-test-xdg-"));
-    tempConfigHome = join(tempXdgRoot, "config");
-    tempDataHome = join(tempXdgRoot, "data");
-    tempStateHome = join(tempXdgRoot, "state");
-
     process.env.USERPROFILE = tempHome;
     process.env.HOMEDRIVE = tempHome[0] + ":";
-    process.env.XDG_CONFIG_HOME = tempConfigHome;
-    process.env.XDG_DATA_HOME = tempDataHome;
-    process.env.XDG_STATE_HOME = tempStateHome;
 
     // 复制真 SvcCtl.exe 作 bundled
     realSvcCtl = realpathSync(join(import.meta.dir, "..", "bin", "SvcCtl.exe"));
@@ -85,19 +66,12 @@ describeWin("installWindows — 全新 install 路径", () => {
     else process.env.USERPROFILE = savedUserProfile;
     if (savedHomeDrive === undefined) delete process.env.HOMEDRIVE;
     else process.env.HOMEDRIVE = savedHomeDrive;
-    if (savedXdgConfig === undefined) delete process.env.XDG_CONFIG_HOME;
-    else process.env.XDG_CONFIG_HOME = savedXdgConfig;
-    if (savedXdgData === undefined) delete process.env.XDG_DATA_HOME;
-    else process.env.XDG_DATA_HOME = savedXdgData;
-    if (savedXdgState === undefined) delete process.env.XDG_STATE_HOME;
-    else process.env.XDG_STATE_HOME = savedXdgState;
 
     try { rmSync(tempHome, { recursive: true, force: true }); } catch {}
-    try { rmSync(tempXdgRoot, { recursive: true, force: true }); } catch {}
   });
 
-  test("pre-call：XDG_STATE_HOME/svcctl 不存在（证明是全新环境）", () => {
-    expect(existsSync(join(tempStateHome, "svcctl"))).toBe(false);
+  test("pre-call：homedir()/.local/state/svcctl 不存在（证明是全新环境）", () => {
+    expect(existsSync(join(tempHome, ".local", "state", "svcctl"))).toBe(false);
   });
 
   test("installWindows: 写 supervisor + 调 setRunKey + 写 installed.flag 不抛", async () => {
@@ -107,8 +81,8 @@ describeWin("installWindows — 全新 install 路径", () => {
       installedFlagPath,
     } = await import("../src/paths");
 
-    const expectedExe = windowsSupervisorPath();           // = XDG_DATA_HOME/svcctl/bin/SvcCtl.exe
-    const expectedFlag = installedFlagPath();              // = XDG_STATE_HOME/svcctl/installed.flag
+    const expectedExe = windowsSupervisorPath();           // = homedir()/.local/share/svcctl/bin/SvcCtl.exe
+    const expectedFlag = installedFlagPath();              // = homedir()/.local/state/svcctl/installed.flag
 
     expect(existsSync(expectedExe)).toBe(false);
     expect(existsSync(expectedFlag)).toBe(false);

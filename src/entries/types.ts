@@ -1,4 +1,4 @@
-/** 单条 entry —— ~/.svcctl/entries.toml 里的一条记录 */
+/** 单条 entry —— ~/.config/svcctl/entries.toml 里的一条记录 */
 export interface Entry {
   /** slug；entry 内唯一 */
   name: string;
@@ -24,14 +24,10 @@ export interface Entry {
 
 /** entries.toml 顶层结构 */
 export interface EntriesFile {
-  /** schema 版本，便于将来迁移 */
-  version: number;
   entries: Entry[];
 }
 
-export const ENTRIES_VERSION = 2;
-
 /** 空文件默认值 */
 export function emptyEntriesFile(): EntriesFile {
-  return { version: ENTRIES_VERSION, entries: [] };
+  return { entries: [] };
 }

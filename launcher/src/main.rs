@@ -2,9 +2,8 @@
 // 职责：
 //   1. 隐藏自身 console（#![windows_subsystem = "windows"]）
 //   2. 写 supervisor.pid / supervisor.log / children.json 到 state_dir
-//      （v0.5.4：Windows 上路径定死从 %USERPROFILE% 推，state_dir = %USERPROFILE%/.local/state/svcctl，
-//       entries = %USERPROFILE%/.config/svcctl/entries.toml；非 Windows 走 SVCCTL_HOME →
-//       XDG_*_HOME → ~/.svcctl 旧链，见 locate_svcctl_paths）
+//      （v0.5.5：全平台 hardcode homedir()，state_dir = homedir()/.local/state/svcctl，
+//       entries = homedir()/.config/svcctl/entries.toml，见 locate_svcctl_paths）
 //   3. 读 entries.toml
 //   4. 对每条 startup:true 的 entry 用 CREATE_NO_WINDOW 拉起，
 //      stdio 重定向到 state_dir/logs/<name>.log（append）
@@ -673,9 +672,9 @@ fn write_children_json(path: &PathBuf, state: &HashMap<String, ChildRecord>) {
     }
 }
 
-/// v0.5.4: Windows 上路径定死从 %USERPROFILE% 推（不再读 XDG env、不再 fallback ~/.svcctl），
-/// 跟 JS 端 xdgStateHome() / xdgConfigHome() 硬编码值完全一致。
-/// 非 Windows 保留旧链：SVCCTL_HOME → XDG_*_HOME → ~/.svcctl fallback。
+/// v0.5.5: 全平台 hardcode `homedir()/.local/state/svcctl` 和 `homedir()/.config/svcctl/entries.toml`。
+/// 不读 SVCCTL_HOME / XDG_*_HOME env，不 fallback 到 ~/.svcctl/。
+/// 跟 JS 端 xdgStateHome() / xdgConfigHome() 硬编码值完全一致，避免跨进程路径错位。
 struct SvcCtlPaths {
     /// supervisor 自身状态目录：supervisor.pid / supervisor.log / children.json / control.json
     state_dir: PathBuf,
@@ -685,48 +684,14 @@ struct SvcCtlPaths {
 
 fn locate_svcctl_paths() -> Result<SvcCtlPaths, String> {
     #[cfg(windows)]
-    {
-        // v0.5.4: Windows 上从 USERPROFILE 硬编码，不再兼容 XDG env / ~/.svcctl。
-        let home = env::var("USERPROFILE").map_err(|_| "USERPROFILE not set".to_string())?;
-        let home_path = PathBuf::from(&home);
-        return Ok(SvcCtlPaths {
-            state_dir: home_path.join(".local").join("state").join("svcctl"),
-            entries: home_path.join(".config").join("svcctl").join("entries.toml"),
-        });
-    }
-
+    let home = env::var("USERPROFILE").map_err(|_| "USERPROFILE not set".to_string())?;
     #[cfg(not(windows))]
-    {
-        // 1. SVCCTL_HOME 显式覆盖（向后兼容老用户自定义路径）
-        if let Ok(p) = env::var("SVCCTL_HOME") {
-            let path = PathBuf::from(p);
-            if path.exists() {
-                return Ok(SvcCtlPaths {
-                    state_dir: path.clone(),
-                    entries: path.join("entries.toml"),
-                });
-            }
-        }
-
-        let home = env::var("HOME").map_err(|_| "HOME not set".to_string())?;
-        let home_path = PathBuf::from(&home);
-
-        // 2. XDG env（v0.5.0+ 路径）
-        let state_env = env::var("XDG_STATE_HOME").ok();
-        let config_env = env::var("XDG_CONFIG_HOME").ok();
-        if let (Some(state), Some(config)) = (state_env, config_env) {
-            let state_dir = PathBuf::from(state).join("svcctl");
-            let entries = PathBuf::from(config).join("svcctl").join("entries.toml");
-            return Ok(SvcCtlPaths { state_dir, entries });
-        }
-
-        // 3. fallback: ~/.svcctl（v0.4.x 默认，保留兼容性）
-        let legacy = home_path.join(".svcctl");
-        Ok(SvcCtlPaths {
-            state_dir: legacy.clone(),
-            entries: legacy.join("entries.toml"),
-        })
-    }
+    let home = env::var("HOME").map_err(|_| "HOME not set".to_string())?;
+    let home_path = PathBuf::from(&home);
+    Ok(SvcCtlPaths {
+        state_dir: home_path.join(".local").join("state").join("svcctl"),
+        entries: home_path.join(".config").join("svcctl").join("entries.toml"),
+    })
 }
 
 fn file_mtime_ms(path: &PathBuf) -> u64 {

@@ -35,7 +35,7 @@ function mkEntry(over: Partial<Entry> & { name: string }): Entry {
 }
 
 function seed(entries: Entry[]): void {
-  saveEntriesAt({ version: 1, entries }, tomlPath);
+  saveEntriesAt({ entries }, tomlPath);
 }
 
 beforeEach(() => {

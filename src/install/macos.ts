@@ -1,5 +1,8 @@
 /**
  * macOS: 写 ~/Library/LaunchAgents/com.svcctl.supervisor.plist + launchctl bootstrap
+ *
+ * v0.5.5: 不再设 SVCCTL_HOME env；supervisor 路径从 homedir() 硬编码推，
+ * launchd bootstrap 时 env 空也能写到正确位置。
  */
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
@@ -29,7 +32,7 @@ export function installMacOS(opts: MacOSInstallOptions): void {
 
   const agentsDir = join(opts.homeDir ?? homedir(), "Library", "LaunchAgents");
   mkdirSync(agentsDir, { recursive: true });
-  const plist = generatePlist(opts.cliPath, opts.homeDir);
+  const plist = generatePlist(opts.cliPath);
   const plistFile = plistPath();
   writeFileSync(plistFile, plist, "utf-8");
   info(`wrote plist to ${plistFile}`);
@@ -75,8 +78,9 @@ export function isInstalledMacOS(): boolean {
   return process.platform === "darwin" && existsSync(plistPath());
 }
 
-function generatePlist(cliPath: string, homeDir?: string): string {
-  const log = supervisorLogPath(); // 默认用 ~/.svcctl/supervisor.log
+/** @internal — exported for tests */
+export function generatePlist(cliPath: string): string {
+  const log = supervisorLogPath();
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -89,10 +93,6 @@ function generatePlist(cliPath: string, homeDir?: string): string {
     <string>${cliPath}</string>
     <string>_supervise</string>
   </array>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>SVCCTL_HOME</key><string>${homeDir ?? homedir()}/.svcctl</string>
-  </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>${log}</string>

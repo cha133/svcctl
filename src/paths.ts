@@ -54,9 +54,9 @@ export function controlJsonPath(): string {
  * dir 在 PATH，会污染命令命名空间）。supervisor 升级时由 install/windows.ts 走
  * stop → copyFileSync → start 路径替换（svcctl v0.4.13 修过 NTFS lock）。
  *
- * v0.5.4: HKCU\Run 直接注册这个 .exe（删了 v0.5.2-v0.5.3 那个 XDG env wrapper .cmd）。
- * 路径写死在 Rust supervisor 的 locate_svcctl_paths() Windows 分支里，boot 启动时
- * 没有 env 也能写到正确的 XDG 风格目录。
+ * v0.5.5: 全平台路径 hardcode 自 homedir()/.local/share/svcctl/bin/，无 env 依赖。
+ * Windows 由 HKCU\Run 注册这个 .exe；POSIX supervisor 是 `bun run <cliPath>` 不需要落 .exe。
+ * 路径在 Rust supervisor `locate_svcctl_paths()` 里硬编码（v0.5.4 Windows + v0.5.5 全平台）。
  */
 export function windowsSupervisorPath(): string {
   return join(xdgDataHome(), "svcctl", "bin", "SvcCtl.exe");

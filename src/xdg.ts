@@ -2,36 +2,28 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 /**
- * v0.5.4: Windows 上路径定死从 homedir() 拼（= %USERPROFILE%/.local/state 等），
- * 不再读 XDG_*_HOME env、不再 fallback 到 %APPDATA%。跟 Rust supervisor
- * `locate_svcctl_paths()` 的 Windows 分支完全一致，避免跨进程路径错位。
- * Mac/Linux 保留 XDG env + homedir fallback。
+ * v0.5.5: 全平台路径从 homedir() 拼（= ~/.local/state 等），
+ * 不读 SVCCTL_HOME / XDG_*_HOME env、不 fallback ~/.svcctl/。
+ * 跟 Rust supervisor `locate_svcctl_paths()` 全平台行为一致，
+ * 避免 CLI 跟 supervisor 路径错位。
+ *
+ * 函数名 `xdgHome` 保留作历史记号；实现上不再读 XDG。
  */
-function xdgHome(envVar: string, fallback: string): string {
-  if (process.platform === "win32") {
-    return join(homedir(), fallback);
-  }
-  const v = process.env[envVar];
-  if (v && v.length > 0) return v;
+function xdgHome(fallback: string): string {
   return join(homedir(), fallback);
 }
 
 /** ~/.config — 用户可编辑的配置 */
 export function xdgConfigHome(): string {
-  return xdgHome("XDG_CONFIG_HOME", ".config");
+  return xdgHome(".config");
 }
 
-/** ~/.local/share — 用户专属数据（包括装到本地的二进制如 SvcCtl.exe） */
+/** ~/.local/share — Windows-only (.exe 落点)；POSIX 不再读 XDG_DATA_HOME */
 export function xdgDataHome(): string {
-  return xdgHome("XDG_DATA_HOME", join(".local", "share"));
+  return xdgHome(join(".local", "share"));
 }
 
 /** ~/.local/state — 运行时状态（pid、log、IPC、child 列表、installed.flag） */
 export function xdgStateHome(): string {
-  return xdgHome("XDG_STATE_HOME", join(".local", "state"));
-}
-
-/** ~/.cache — 可重新生成的缓存 */
-export function xdgCacheHome(): string {
-  return xdgHome("XDG_CACHE_HOME", ".cache");
+  return xdgHome(join(".local", "state"));
 }

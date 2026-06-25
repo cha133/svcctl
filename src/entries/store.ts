@@ -3,16 +3,10 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { entriesTomlPath, ensureSvcctlDir } from "../paths";
-import { runStartupMigrations } from "../migrate";
 import { emptyEntriesFile, type Entry, type EntriesFile } from "./types";
 
 /** 读 entries.toml（path 可注入，测试用）；不存在/空 → 默认空文件 */
 export function loadEntriesAt(path: string = entriesTomlPath()): EntriesFile {
-  // 启动早期跑一次 schema migrations（v0.5.0+：从 ~/.svcctl/ 搬到 XDG）。
-  // 跳过条件见 runStartupMigrations doc。
-  if (path === entriesTomlPath()) {
-    runStartupMigrations();
-  }
   if (!existsSync(path)) {
     return emptyEntriesFile();
   }
@@ -23,7 +17,6 @@ export function loadEntriesAt(path: string = entriesTomlPath()): EntriesFile {
     // 防御性：空 entries 字段也当空文件处理
     if (!parsed || !Array.isArray(parsed.entries)) return emptyEntriesFile();
     return {
-      version: parsed.version ?? 1,
       entries: parsed.entries as Entry[],
     };
   } catch {

@@ -36,7 +36,6 @@ describe("loadEntriesAt", () => {
 
   test("round-trips written file", () => {
     const written = {
-      version: 1,
       entries: [
         {
           name: "bunx-cctra",
@@ -100,7 +99,6 @@ describe("removeEntryAt", () => {
 describe("file content", () => {
   test("startup: false round-trips in TOML", () => {
     const written = {
-      version: 1,
       entries: [
         {
           name: "bar",
@@ -120,7 +118,6 @@ describe("file content", () => {
 
   test("startup: omitted (default true) survives round-trip as undefined", () => {
     const written = {
-      version: 1,
       entries: [
         {
           name: "baz",
@@ -139,7 +136,6 @@ describe("file content", () => {
 
   test("startup: true round-trips", () => {
     const written = {
-      version: 1,
       entries: [
         {
           name: "qux",
@@ -157,7 +153,6 @@ describe("file content", () => {
 
   test("written file is valid TOML", () => {
     const written = {
-      version: 1,
       entries: [
         {
           name: "foo",
