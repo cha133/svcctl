@@ -23,8 +23,8 @@ export function isSupervisorRunning(): boolean {
   }
 }
 
-/** 向 supervisor 发送 control 命令（写入 control.json） */
-export function sendControlCommand(action: "start" | "stop" | "restart", name: string): void {
+/** 向 supervisor 发送 control 命令（写入 control.json）。shutdown 是全局停机（v0.5.9），不带 entry name */
+export function sendControlCommand(action: "start" | "stop" | "restart" | "shutdown", name: string): void {
   const path = controlJsonPath();
   // 清理可能残留的旧 control.json（supervisor 旧版不处理会残留）
   if (existsSync(path)) {

@@ -285,6 +285,24 @@ fn process_control_file(
         }
     };
 
+    // v0.5.9: 全局温柔停机（CLI `svcctl stop` 无参走这里）。必须在 entry lookup
+    // 之前处理——shutdown 不携带 entry name。
+    // 跟 ctrl-c 退出路径同一套语义：逐 child kill_tree_windows（定向 Ctrl+Break
+    // + 5s grace + Job 兑底），全杀完删 pid/children.json 再退出。
+    // 取代旧路径（CLI 给每个 entry 写 stop 再立刻 taskkill /F）：control.json
+    // 单文件互相覆盖只剩最后一条、grace 来不及生效、还残留幽灵 control.json。
+    if cmd.action == "shutdown" {
+        let _ = fs::remove_file(&control_path);
+        log_line(sup_log_path, "received shutdown command, stopping all children");
+        for (name, mut rec) in state.drain() {
+            kill_tree_windows(&mut rec, sup_log_path);
+            log_line(sup_log_path, &format!("killed child '{}'", name));
+        }
+        let _ = fs::remove_file(svcctl_dir.join("supervisor.pid"));
+        let _ = fs::remove_file(children_json_path);
+        std::process::exit(0);
+    }
+
     // 读 entries.toml 拿该 entry 的最新 config
     let entry = match (|| -> Result<Option<Entry>, String> {
         let bytes = fs::read(entries_path).map_err(|e| e.to_string())?;

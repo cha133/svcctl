@@ -87,9 +87,17 @@ function readSupervisorPid(): number | null {
 }
 
 /**
- * v0.4.4: 全局 stop 改为走 IPC 路径 —— 让 supervisor 走温柔 Ctrl+C + Job 兜底杀整棵树，
- * 避免 CLI 端 taskkill 漏 grandchild。
- * 等待 supervisor 自己退出（删 supervisor.pid 文件），最多 5s。
+ * v0.5.9: 全局 stop 走 supervisor 的 "shutdown" IPC —— supervisor 收到后对每个 child
+ * 依次做定向 Ctrl+Break + 5s grace + Job 兑底杀整棵树，全杀完自己退出（删 pid）。
+ *
+ * 旧路径（v0.4.4）有两个结构性问题：
+ *   1. control.json 是单文件，给 N 个 entry 写 stop 会互相覆盖，只有最后一条生效
+ *   2. 写完 IPC 立刻 taskkill /F，supervisor 每 1s 才轮询一次，grace 永远来不及
+ *      生效，children 实际全是被 Job close 强杀的；没读到的 control.json 还会
+ *      残留成幽灵命令（v0.5.8 已在 supervisor 启动时清理）
+ *
+ * 兼容：老 supervisor 不认识 shutdown（entry lookup 找不到空 name → 丢弃），
+ * CLI 超时后 fallback taskkill /F（Job close 仍会带走整棵 child 树）。
  */
 async function stopWindows(): Promise<void> {
   const pid = readSupervisorPid();
@@ -98,32 +106,34 @@ async function stopWindows(): Promise<void> {
     return;
   }
 
-  // 发 stop IPC 给每个 entry（supervisor 收到后温柔 Ctrl+C + Job 兜底）
-  const childrenFile = childrenJsonPath();
-  if (existsSync(childrenFile)) {
+  // 每个 running child 最多占 5s grace（顺序处理），+2s buffer，至少 5s
+  let childCount = 0;
+  if (existsSync(childrenJsonPath())) {
     try {
-      const data = JSON.parse(readFileSync(childrenFile, "utf-8")) as Record<string, number>;
-      for (const name of Object.keys(data)) {
-        sendControlCommand("stop", name);
-      }
+      childCount = Object.keys(
+        JSON.parse(readFileSync(childrenJsonPath(), "utf-8")) as Record<string, number>
+      ).length;
     } catch {}
   }
+  const timeoutMs = Math.max(STOP_TIMEOUT_MS, childCount * GRACE_TIMEOUT_MS + 2000);
 
-  // supervisor 收到 stop 后：
-  // 1) 温柔 Ctrl+C 给所有 entry（30s 等待）
-  // 2) Job 兜底关 handle → 杀整棵进程树
-  // 3) supervisor 自己退出（删 supervisor.pid）
-  // 我们等它退出即可
-  try {
-    execSync(`taskkill /F /PID ${pid}`, { stdio: "pipe" });
-    info(`sent supervisor (pid=${pid}) stop signal`);
-  } catch (e) {
-    info(`supervisor (pid=${pid}) not killable: ${(e as Error).message}`);
+  sendControlCommand("shutdown", "");
+  const graceTimer = withStopCountdown("stopping all entries", timeoutMs);
+  const exited = await waitForSupervisorExit(timeoutMs);
+  graceTimer.clear();
+
+  if (!exited) {
+    // 超时兑底：老 supervisor 不认识 shutdown / 卡死 → 强杀
+    info("graceful shutdown timed out, force killing supervisor...");
+    try {
+      execSync(`taskkill /F /PID ${pid}`, { stdio: "pipe" });
+    } catch (e) {
+      info(`supervisor (pid=${pid}) not killable: ${(e as Error).message}`);
+    }
+    try {
+      unlinkSync(supervisorPidPath());
+    } catch {}
   }
-  // 兜底 supervisor 自己（极端情况：supervisor 卡在 IPC 死循环）
-  try {
-    unlinkSync(supervisorPidPath());
-  } catch {}
 }
 
 function stopMacOS(): void {
@@ -143,12 +153,13 @@ function stopLinux(): void {
   }
 }
 
-async function waitForSupervisorExit(): Promise<void> {
+async function waitForSupervisorExit(timeoutMs: number = STOP_TIMEOUT_MS): Promise<boolean> {
   const start = Date.now();
-  while (Date.now() - start < STOP_TIMEOUT_MS) {
-    if (!existsSync(supervisorPidPath())) return;
+  while (Date.now() - start < timeoutMs) {
+    if (!existsSync(supervisorPidPath())) return true;
     await new Promise((r) => setTimeout(r, 100));
   }
+  return false;
 }
 
 /** commander 注册：`svcctl stop [name]` */
