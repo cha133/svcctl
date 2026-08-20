@@ -2,8 +2,12 @@
 export interface Entry {
   /** slug；entry 内唯一 */
   name: string;
-  /** exec head（"bun" / "node" / "/usr/local/bin/foo" / "C:\\..."） */
+  /** exec head（"bun" / "node" / "/usr/local/bin/foo" / "C:\\..."）—— 用户输入的原文，显示用 */
   command: string;
+  /** v0.5.7: add 时按 PATH+PATHEXT 解析出的绝对路径（可选）。supervisor spawn 优先用它，
+   *  没有（或文件已不存在）则运行时重新解析 command。存储/显示分离：
+   *  status / ls 显示 command 原文，resolved 只在 status <name> 详情里展示。 */
+  resolved?: string;
   /** argv tail */
   args: string[];
   /** 可选工作目录，默认 homedir() */

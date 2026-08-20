@@ -58,6 +58,10 @@ const GRACE_PERIOD_MS: u64 = 5000;
 struct Entry {
     name: String,
     command: String,
+    /// v0.5.7: add 时解析好的绝对路径（可选）。存在且文件仍在 → 直接用；
+    /// 否则回退到运行时 resolve_command（存量 entry 无此字段也兼容）。
+    #[serde(default)]
+    resolved: Option<String>,
     #[serde(default)]
     args: Vec<String>,
     #[serde(default)]
@@ -127,6 +131,17 @@ fn run() -> Result<(), String> {
     let my_pid = std::process::id().to_string();
     fs::write(&pid_path, &my_pid).map_err(|e| e.to_string())?;
     log_line(&sup_log_path, &format!("supervisor started (pid={})", my_pid));
+
+    // v0.5.7: 删掉上一任 supervisor 残留的 control.json。
+    // 场景：CLI `svcctl stop`（无参）先给每个 entry 写 stop 命令到 control.json，
+    // 然后立刻 taskkill /F —— supervisor 每 1s 才轮询一次，大概率没读到就被杀，
+    // control.json 残留。新 supervisor 若不清理，会在启动后执行这条"幽灵 stop"，
+    // 把刚 spawn 的 entry 又杀掉（实测：stop+start 后 dsh-web 起不来）。
+    let stale_control = svcctl_dir.join("control.json");
+    if stale_control.exists() {
+        let _ = fs::remove_file(&stale_control);
+        log_line(&sup_log_path, "removed stale control.json from previous supervisor lifetime");
+    }
 
     // ctrl-c handler
     let (tx, rx) = channel::<()>();
@@ -361,6 +376,67 @@ fn process_control_file(
     }
 }
 
+/// v0.5.7: CreateProcessW 只自动补 .exe、**不查 PATHEXT**，npm/scoop 的 `.cmd` shim
+/// （如 `dsh` → `dsh.cmd`）会 spawn "program not found"。手动按 PATH+PATHEXT 解析裸命令名：
+///   - 含路径分隔符 → 原样返回（用户已显式给路径）
+///   - 逐 PATH 目录按 PATHEXT 顺序尝试；跳过无扩展名文件（bash shim 执行不了）
+///   - 解析不到 → 原样返回（保留 CreateProcess 自带搜索：system32 / CWD 等）
+fn resolve_command(command: &str) -> String {
+    if command.contains(['/', '\\']) {
+        return command.to_string();
+    }
+    let path_var = env::var("PATH").unwrap_or_default();
+    let pathext = env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+    let exts: Vec<String> = pathext
+        .split(';')
+        .map(|e| e.trim().to_uppercase())
+        .filter(|e| !e.is_empty())
+        .collect();
+
+    // 已带扩展名（如 "foo.exe"）：扩展必须在 PATHEXT 内，按原名找
+    if let Some(dot) = command.rfind('.') {
+        if dot > 0 {
+            let ext = command[dot..].to_uppercase();
+            if exts.iter().any(|e| e == &ext) {
+                for dir in path_var.split(';').filter(|d| !d.is_empty()) {
+                    let cand = PathBuf::from(dir).join(command);
+                    if cand.is_file() {
+                        return cand.to_string_lossy().into_owned();
+                    }
+                }
+            }
+            return command.to_string();
+        }
+    }
+
+    // 裸名：目录优先，目录内按 PATHEXT 顺序（Windows FS 大小写不敏感）
+    for dir in path_var.split(';').filter(|d| !d.is_empty()) {
+        for ext in &exts {
+            let cand = PathBuf::from(dir).join(format!("{}{}", command, ext.to_lowercase()));
+            if cand.is_file() {
+                return cand.to_string_lossy().into_owned();
+            }
+        }
+    }
+    command.to_string()
+}
+
+/// v0.5.7: .cmd/.bat 不能被 CreateProcessW 直接执行，需 cmd.exe 包装
+fn is_batch_script(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    lower.ends_with(".cmd") || lower.ends_with(".bat")
+}
+
+/// v0.5.7: cmd 命令行 token 引号处理。含空白 / cmd 元字符 / 引号时包双引号，
+/// 内嵌引号用 \"（target 程序侧 CommandLineToArgvW 能解）。
+fn quote_cmd_token(s: &str) -> String {
+    if s.is_empty() || s.chars().any(|c| " \t&|<>^\"".contains(c)) {
+        format!("\"{}\"", s.replace('"', "\\\""))
+    } else {
+        s.to_string()
+    }
+}
+
 fn spawn_one(
     entry: &Entry,
     svcctl_dir: &PathBuf,
@@ -375,9 +451,44 @@ fn spawn_one(
         .map_err(|e| format!("open log {}: {}", log_path.display(), e))?;
     let log_file_err = log_file.try_clone().map_err(|e| e.to_string())?;
 
-    let mut cmd = Command::new(&entry.command);
-    cmd.args(&entry.args)
-        .stdin(Stdio::null())
+    // v0.5.7: spawn 路径优先级 —— entry.resolved（add 时解析存好的，文件还在才用）
+    // → 运行时 resolve_command（PATH+PATHEXT）。.cmd/.bat 走 cmd.exe /d /s /c 包装。
+    // /s 语义：去掉 /c 后字符串的首尾引号，中间原样执行 → 避免 cmd 引号规则的坑。
+    // 不弹黑框已实验验证：cmd.exe 带 CREATE_NO_WINDOW 时，批处理里的孙子进程
+    // 也拿不到 console（GetConsoleWindow()=0）。
+    let resolved = match &entry.resolved {
+        Some(r) if !r.is_empty() && PathBuf::from(r).is_file() => r.clone(),
+        _ => resolve_command(&entry.command),
+    };
+    let mut cmd = if is_batch_script(&resolved) {
+        let mut line = quote_cmd_token(&resolved);
+        for a in &entry.args {
+            line.push(' ');
+            line.push_str(&quote_cmd_token(a));
+        }
+        let comspec = env::var("ComSpec").unwrap_or_else(|_| "cmd.exe".to_string());
+        let mut c = Command::new(comspec);
+        // raw_arg：整行手工构造，避免 Rust 默认的 MSVCRT 引号规则跟 cmd 规则叠加
+        c.raw_arg(format!("/d /s /c \"{}\"", line));
+        if resolved != entry.command {
+            log_line(
+                sup_log_path,
+                &format!("resolved '{}' → '{}' (via cmd /c)", entry.command, resolved),
+            );
+        }
+        c
+    } else {
+        if resolved != entry.command {
+            log_line(
+                sup_log_path,
+                &format!("resolved '{}' → '{}'", entry.command, resolved),
+            );
+        }
+        let mut c = Command::new(&resolved);
+        c.args(&entry.args);
+        c
+    };
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_err))
         .creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
@@ -654,7 +765,7 @@ fn reconcile(
 }
 
 fn entry_changed(a: &Entry, b: &Entry) -> bool {
-    if a.command != b.command || a.args != b.args || a.cwd != b.cwd {
+    if a.command != b.command || a.resolved != b.resolved || a.args != b.args || a.cwd != b.cwd {
         return true;
     }
     a.env.len() != b.env.len() || a.env.iter().any(|(k, v)| b.env.get(k) != Some(v))

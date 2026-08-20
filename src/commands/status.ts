@@ -55,6 +55,11 @@ async function statusEntry(query: string): Promise<void> {
   // 1) 头部 + 静态信息
   console.log(bold(`● ${entry.name}`));
   console.log(kvRow("command", entry.command));
+  // v0.5.7: 存储/显示分离——command 是用户输入原文，resolved 是 spawn 实际执行路径
+  if (entry.resolved && entry.resolved !== entry.command) {
+    const viaCmd = /\.(cmd|bat)$/i.test(entry.resolved) ? dim(" (via cmd /c)") : "";
+    console.log(kvRow("resolved", entry.resolved + viaCmd));
+  }
   console.log(kvRow("args", entry.args.length ? entry.args.join(" ") : dim("(none)")));
   console.log(kvRow("cwd", entry.cwd ?? dim("(default)")));
   if (entry.env && Object.keys(entry.env).length) {

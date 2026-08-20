@@ -4,6 +4,7 @@
 import { addEntry } from "../entries/store";
 import { slugify, validateSlug } from "../entries/name";
 import { looksLikeShellTokenizationMistake } from "../entries/command";
+import { resolveCommand } from "../entries/resolve";
 import type { Entry } from "../entries/types";
 import type { Command } from "commander";
 import { existsSync } from "node:fs";
@@ -64,6 +65,14 @@ export async function addCommand(commandArgs: string[], opts: AddOptions): Promi
     process.exit(1);
   }
 
+  // 2.5 v0.5.7: 裸命令名解析成绝对路径（Windows 上 Rust supervisor 的 CreateProcessW
+  //    不查 PATHEXT，.cmd shim 会 spawn "program not found"；注册时解析一劳永逸）。
+  //    name 派生仍用原始 command（上面已完成），避免绝对路径污染 slug。
+  const resolved = resolveCommand(command);
+  if (resolved) {
+    info(`resolved "${command}" → ${resolved}`);
+  }
+
   // 3. 解析 env
   const env: Record<string, string> = {};
   for (const kv of opts.env ?? []) {
@@ -80,7 +89,8 @@ export async function addCommand(commandArgs: string[], opts: AddOptions): Promi
   // 4. add
   const entry: Entry = {
     name,
-    command,
+    command, // 用户输入原文，显示用
+    ...(resolved ? { resolved } : {}), // v0.5.7: spawn 用的绝对路径
     args,
     ...(opts.cwd ? { cwd: opts.cwd } : {}),
     ...(Object.keys(env).length > 0 ? { env } : {}),
