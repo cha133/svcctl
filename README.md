@@ -109,8 +109,9 @@ git push origin main v0.4.0
 
 `.github/workflows/publish.yml` verifies the tag and synchronized versions,
 builds and checks the x64 and ARM64 PE files, runs the test suite, creates all
-three npm tarballs, and submits unpublished packages with `npm stage publish`.
-Approve the two platform packages first and the `svcctl` main package last.
+three npm tarballs, and publishes missing packages with `npm publish`. Trusted
+Publishing authenticates the workflow through OIDC, so releases after the
+initial platform-package bootstrap require no npm token or interactive 2FA.
 
 Publishing uses npm Trusted Publishing (OIDC), so the workflow does not need an
 `NPM_TOKEN`. Configure each npm package with this publisher after it exists:
@@ -121,11 +122,11 @@ User or organization: cha133
 Repository: svcctl
 Workflow: publish.yml
 Environment: npm-release
-Allowed action: npm stage publish
+Allowed action: npm publish
 ```
 
 The two platform package names must be bootstrapped once because npm cannot
-stage or configure Trusted Publishing for a package that does not exist yet.
+configure Trusted Publishing for a package that does not exist yet.
 For the first release, download the `npm-release-v<version>` artifact produced
 by the workflow and manually publish these two tarballs with 2FA:
 
@@ -134,8 +135,9 @@ npm publish svcctl-win32-x64-<version>.tgz --access public
 npm publish svcctl-win32-arm64-<version>.tgz --access public
 ```
 
-Then configure Trusted Publishing for both packages and rerun the failed
-workflow. It skips versions already live on npm and stages the main package.
+Then configure Trusted Publishing for both packages and rerun the release by
+updating the tag to the latest release commit. It skips versions already live
+on npm and publishes the main package automatically.
 
 ## License
 

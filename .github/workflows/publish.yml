@@ -52,7 +52,7 @@ jobs:
           retention-days: 7
 
   publish:
-    name: Stage npm release
+    name: Publish npm release
     needs: build-windows
     runs-on: ubuntu-24.04
     environment: npm-release
@@ -68,7 +68,7 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      - name: Use an npm version with staged publishing support
+      - name: Use an npm version with Trusted Publishing support
         run: npm install --global npm@11.19.0
 
       - uses: actions/download-artifact@v8
@@ -115,21 +115,21 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Stage unpublished packages on npm
+      - name: Publish missing packages to npm
         shell: bash
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          stage_if_missing() {
+          publish_if_missing() {
             local name="$1"
             local tarball="$2"
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "$name@$version is already published; skipping"
             else
-              npm stage publish "$tarball"
+              npm publish "$tarball"
             fi
           }
 
-          stage_if_missing svcctl-win32-x64 "./release/svcctl-win32-x64-$version.tgz"
-          stage_if_missing svcctl-win32-arm64 "./release/svcctl-win32-arm64-$version.tgz"
-          stage_if_missing svcctl "./release/svcctl-$version.tgz"
+          publish_if_missing svcctl-win32-x64 "./release/svcctl-win32-x64-$version.tgz"
+          publish_if_missing svcctl-win32-arm64 "./release/svcctl-win32-arm64-$version.tgz"
+          publish_if_missing svcctl "./release/svcctl-$version.tgz"
