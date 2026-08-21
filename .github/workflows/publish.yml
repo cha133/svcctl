@@ -44,7 +44,7 @@ jobs:
         if: matrix.arch == 'x64'
         run: bun run verify
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.package }}
           path: packages/${{ matrix.package }}/SvcCtl.exe
@@ -71,12 +71,12 @@ jobs:
       - name: Use an npm version with staged publishing support
         run: npm install --global npm@11.19.0
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: svcctl-win32-x64
           path: packages/svcctl-win32-x64
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: svcctl-win32-arm64
           path: packages/svcctl-win32-arm64
@@ -98,14 +98,17 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          if tar -tf "release/svcctl-$version.tgz" | grep -Eqi '\.exe$'; then
+          tar -tf "release/svcctl-$version.tgz" > /tmp/svcctl-main-files.txt
+          tar -tf "release/svcctl-win32-x64-$version.tgz" > /tmp/svcctl-x64-files.txt
+          tar -tf "release/svcctl-win32-arm64-$version.tgz" > /tmp/svcctl-arm64-files.txt
+          if grep -Eqi '\.exe$' /tmp/svcctl-main-files.txt; then
             echo "The main svcctl package must not contain a Windows executable" >&2
             exit 1
           fi
-          tar -tf "release/svcctl-win32-x64-$version.tgz" | grep -qx 'package/SvcCtl.exe'
-          tar -tf "release/svcctl-win32-arm64-$version.tgz" | grep -qx 'package/SvcCtl.exe'
+          grep -qx 'package/SvcCtl.exe' /tmp/svcctl-x64-files.txt
+          grep -qx 'package/SvcCtl.exe' /tmp/svcctl-arm64-files.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: npm-release-${{ github.ref_name }}
           path: release/*.tgz
