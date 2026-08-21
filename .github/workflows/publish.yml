@@ -130,6 +130,6 @@ jobs:
             fi
           }
 
-          stage_if_missing svcctl-win32-x64 "release/svcctl-win32-x64-$version.tgz"
-          stage_if_missing svcctl-win32-arm64 "release/svcctl-win32-arm64-$version.tgz"
-          stage_if_missing svcctl "release/svcctl-$version.tgz"
+          stage_if_missing svcctl-win32-x64 "./release/svcctl-win32-x64-$version.tgz"
+          stage_if_missing svcctl-win32-arm64 "./release/svcctl-win32-arm64-$version.tgz"
+          stage_if_missing svcctl "./release/svcctl-$version.tgz"
