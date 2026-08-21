@@ -17,9 +17,9 @@
   ],
   "scripts": {
     "dev": "bun run src/index.ts",
-    "test": "bun test",
+    "test": "bun test --max-concurrency=1",
     "typecheck": "bunx tsc --noEmit",
-    "verify": "bunx tsc --noEmit && bun test",
+    "verify": "bunx tsc --noEmit && bun test --max-concurrency=1",
     "build:icon": "pwsh -ExecutionPolicy Bypass -File scripts/build-icon.ps1",
     "build:launcher": "pwsh -ExecutionPolicy Bypass -File scripts/build-launcher.ps1",
     "build:platforms": "pwsh -ExecutionPolicy Bypass -File scripts/build-platforms.ps1",
