@@ -27,7 +27,7 @@ export function readExeVersion(exePath: string): string {
   }
 }
 
-/** 规范化 version：strip 末尾 ".0"（让 "0.4.11.0" → "0.4.11" 跟 package.json semver 对齐） */
+/** 规范化四段 PE version；三段 semver 的 patch=0 必须保留。 */
 export function normalizeVersion(v: string): string {
-  return v.replace(/\.0$/, "");
+  return v.replace(/^(\d+\.\d+\.\d+)\.0$/, "$1");
 }

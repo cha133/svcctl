@@ -1,6 +1,7 @@
 node_modules/
 launcher/target/
 bin/SvcCtl.exe
+packages/*/SvcCtl.exe
 bin/svcctl
 # 源图 + 母图备份（不入仓）
 icon-image-resized.png

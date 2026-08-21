@@ -1,57 +1,95 @@
-# Build the Windows Rust supervisor
-# 编译产物：bin/SvcCtl.exe
+# Build one Windows Rust supervisor target into its npm platform package.
+
+[CmdletBinding()]
+param(
+    [ValidateSet("x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc")]
+    [string]$Target = $(if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq "Arm64") {
+        "aarch64-pc-windows-msvc"
+    } else {
+        "x86_64-pc-windows-msvc"
+    }),
+    [switch]$NoSync
+)
 
 $ErrorActionPreference = "Stop"
-
-Write-Host "[build-launcher] compiling Rust supervisor..." -ForegroundColor Cyan
-Push-Location $PSScriptRoot\..\launcher
-cargo build --release
-if ($LASTEXITCODE -ne 0) {
-    Pop-Location
-    throw "cargo build failed"
+$root = Resolve-Path "$PSScriptRoot\.."
+$packageName = switch ($Target) {
+    "x86_64-pc-windows-msvc" { "svcctl-win32-x64" }
+    "aarch64-pc-windows-msvc" { "svcctl-win32-arm64" }
 }
-Pop-Location
+$expectedMachine = switch ($Target) {
+    "x86_64-pc-windows-msvc" { "x64" }
+    "aarch64-pc-windows-msvc" { "arm64" }
+}
 
-$src = Join-Path $PSScriptRoot "..\launcher\target\release\SvcCtl.exe"
-$dst = Join-Path $PSScriptRoot "..\bin\SvcCtl.exe"
+function Initialize-MsvcEnvironment([string]$Architecture) {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (-not (Test-Path -LiteralPath $vswhere)) {
+        throw "Visual Studio Installer (vswhere.exe) was not found"
+    }
 
-if (-not (Test-Path $src)) {
+    $component = if ($Architecture -eq "arm64") {
+        "Microsoft.VisualStudio.Component.VC.Tools.ARM64"
+    } else {
+        "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+    }
+    $installationPath = & $vswhere -latest -products * -requires $component -property installationPath
+    if (-not $installationPath) {
+        throw "Visual Studio C++ tools for $Architecture are not installed (missing $component)"
+    }
+
+    $devCmd = Join-Path $installationPath "Common7\Tools\VsDevCmd.bat"
+    $environmentLines = & cmd.exe /d /s /c "`"$devCmd`" -no_logo -arch=$Architecture -host_arch=x64 && set"
+    if ($LASTEXITCODE -ne 0) { throw "VsDevCmd failed for $Architecture" }
+    foreach ($line in $environmentLines) {
+        if ($line -match '^([^=]+)=(.*)$') {
+            Set-Item -Path "Env:$($Matches[1])" -Value $Matches[2]
+        }
+    }
+}
+
+Write-Host "[build-launcher] compiling $Target..." -ForegroundColor Cyan
+if ($Target -eq "aarch64-pc-windows-msvc") {
+    Initialize-MsvcEnvironment "arm64"
+}
+Push-Location "$root\launcher"
+try {
+    rustup target add $Target
+    if ($LASTEXITCODE -ne 0) { throw "rustup target add failed for $Target" }
+    cargo build --release --locked --target $Target
+    if ($LASTEXITCODE -ne 0) { throw "cargo build failed for $Target" }
+} finally {
+    Pop-Location
+}
+
+$src = Join-Path $root "launcher\target\$Target\release\SvcCtl.exe"
+$dst = Join-Path $root "packages\$packageName\SvcCtl.exe"
+if (-not (Test-Path -LiteralPath $src)) {
     throw "compiled binary not found: $src"
 }
 
-# 可选: rcedit 强制 set-icon (winres 默认 ID 1 但 rcedit 更稳. scoop install rcedit)
-if (Get-Command rcedit -ErrorAction SilentlyContinue) {
-    $icoPath = Join-Path $PSScriptRoot "..\launcher\assets\svcctl.ico"
-    if (Test-Path $icoPath) {
-        Write-Host "[build-launcher] rcedit: forcing icon to ID 1..." -ForegroundColor Cyan
-        rcedit $src --set-icon $icoPath
-        if ($LASTEXITCODE -ne 0) { throw "rcedit failed" }
-    }
+New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null
+Copy-Item -LiteralPath $src -Destination $dst -Force
+& "$PSScriptRoot\verify-pe-architecture.ps1" -Path $dst -Expected $expectedMachine
+
+$size = (Get-Item -LiteralPath $dst).Length
+Write-Host "[build-launcher] wrote $dst ($([math]::Round($size / 1024)) KB)" -ForegroundColor Green
+
+$nativeTarget = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq "Arm64") {
+    "aarch64-pc-windows-msvc"
 } else {
-    Write-Host "[build-launcher] (optional) install rcedit for guaranteed icon ID 1: scoop install rcedit" -ForegroundColor DarkGray
+    "x86_64-pc-windows-msvc"
 }
 
-New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null
-Copy-Item -Force $src $dst
-Write-Host "[build-launcher] copied to $dst" -ForegroundColor Green
-
-$size = (Get-Item $dst).Length
-Write-Host "[build-launcher] size: $([math]::Round($size / 1024)) KB" -ForegroundColor Green
-
-# v0.4.10: 同步到 $HOME/.svcctl/bin/SvcCtl.exe（install 模式 supervisor 路径）
-# windowsSupervisorPath() (src/paths.ts:61) 永远指 $HOME/.svcctl/bin/SvcCtl.exe，
-# 跟 repo 的 bin/ 目录不同步 → dev 模式跑 install 路径的旧二进制会出现 grace / Job close 行为不一致
-# （v0.4.4 旧二进制 30s grace + 老 Job 行为杀不干净 detached bun grandchild，stop 卡死）。
-# 每次 build 自动同步让 dev 跟 install 用同一份二进制，行为一致。
-# 用 try-catch 因为 supervisor 跑着时这个文件被锁（会失败），warn 而不是 fail build。
-$installBin = Join-Path $env:USERPROFILE ".svcctl\bin\SvcCtl.exe"
-if (Test-Path (Split-Path $installBin)) {
-    try {
-        Copy-Item -Force $src $installBin
-        Write-Host "[build-launcher] synced to $installBin" -ForegroundColor Green
-    } catch {
-        Write-Host "[build-launcher] (skipped, file locked) $installBin — supervisor is running; restart it to pick up new binary" -ForegroundColor DarkYellow
+# Keep the locally installed supervisor in sync only for a native local build.
+if (-not $NoSync -and $Target -eq $nativeTarget) {
+    $installBin = Join-Path $env:USERPROFILE ".local\share\svcctl\bin\SvcCtl.exe"
+    if (Test-Path -LiteralPath (Split-Path $installBin)) {
+        try {
+            Copy-Item -LiteralPath $src -Destination $installBin -Force
+            Write-Host "[build-launcher] synced to $installBin" -ForegroundColor Green
+        } catch {
+            Write-Host "[build-launcher] skipped locked install binary: $installBin" -ForegroundColor DarkYellow
+        }
     }
-} else {
-    Write-Host "[build-launcher] (skipped) install path not found: $installBin" -ForegroundColor DarkGray
 }

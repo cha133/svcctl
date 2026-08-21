@@ -13,6 +13,18 @@
         "@types/bun": "latest",
         "typescript": "^5",
       },
+      "optionalDependencies": {
+        "svcctl-win32-arm64": "0.5.9",
+        "svcctl-win32-x64": "0.5.9",
+      },
+    },
+    "packages/svcctl-win32-arm64": {
+      "name": "svcctl-win32-arm64",
+      "version": "0.5.9",
+    },
+    "packages/svcctl-win32-x64": {
+      "name": "svcctl-win32-x64",
+      "version": "0.5.9",
     },
   },
   "packages": {
@@ -27,6 +39,10 @@
     "picocolors": ["picocolors@1.1.1", "", {}, "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA=="],
 
     "smol-toml": ["smol-toml@1.6.1", "", {}, "sha512-dWUG8F5sIIARXih1DTaQAX4SsiTXhInKf1buxdY9DIg4ZYPZK5nGM1VRIYmEbDbsHt7USo99xSLFu5Q1IqTmsg=="],
+
+    "svcctl-win32-arm64": ["svcctl-win32-arm64@workspace:packages/svcctl-win32-arm64"],
+
+    "svcctl-win32-x64": ["svcctl-win32-x64@workspace:packages/svcctl-win32-x64"],
 
     "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

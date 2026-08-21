@@ -5,8 +5,11 @@ import { installWindows, isInstalledWindows, uninstallWindows } from "./windows"
 import { installMacOS, isInstalledMacOS, uninstallMacOS } from "./macos";
 import { installLinux, isInstalledLinux, uninstallLinux } from "./linux";
 import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
 
 /** install 的可选项 */
 export interface InstallOptions {
@@ -72,26 +75,22 @@ export function isInstalled(): boolean {
   return false;
 }
 
-/** 推断 Windows supervisor 路径：向上递归找 bin/SvcCtl.exe */
-export function defaultWindowsSupervisorPath(): string {
-  // 从当前模块 url 向上递归找 bin/SvcCtl.exe —— 三个调用场景都支持:
-  //   1. bun link (项目目录):           <project>/src/install/index.ts  → <project>/bin/SvcCtl.exe
-  //   2. bunx svcctl install (临时):     <npm-cache>/svcctl/.../install/index.ts  → <npm-cache>/svcctl/.../bin/SvcCtl.exe
-  //   3. bun add -g svcctl install:     <global>/node_modules/svcctl/.../install/index.ts  → <global>/node_modules/svcctl/.../bin/SvcCtl.exe
-  // 前提: package.json "files" 包含 bin/ (让 npm pack 带上 SvcCtl.exe)
-  const path = fileURLToPath(import.meta.url);
-  let dir = dirname(path);
-  // 防御: 最多向上 20 层, 避免符号链接循环
-  for (let i = 0; i < 20; i++) {
-    const candidate = join(dir, "bin", "SvcCtl.exe");
-    if (existsSync(candidate)) return candidate;
-    const parent = dirname(dir);
-    if (parent === dir) break;  // 到根目录了
-    dir = parent;
+/** 当前 Windows 架构对应的 npm 平台包。 */
+export function windowsPlatformPackageName(arch: string = process.arch): string {
+  if (arch === "x64") return "svcctl-win32-x64";
+  if (arch === "arm64") return "svcctl-win32-arm64";
+  throw new Error(`Unsupported Windows architecture: ${arch}. Supported architectures: x64, arm64`);
+}
+
+/** 从 npm/Bun 安装的平台包解析当前架构的 supervisor。 */
+export function defaultWindowsSupervisorPath(arch: string = process.arch): string {
+  const packageName = windowsPlatformPackageName(arch);
+  try {
+    return require.resolve(`${packageName}/SvcCtl.exe`);
+  } catch {
+    throw new Error(
+      `Windows supervisor package ${packageName} is not installed. ` +
+      "Reinstall svcctl without --omit=optional, or pass bundledSupervisorPath explicitly."
+    );
   }
-  throw new Error(
-    "supervisor not found: bin/SvcCtl.exe (向上递归 20 层都没找到). " +
-    "Pass bundledSupervisorPath to install() explicitly, " +
-    "or build with: pwsh scripts/build-launcher.ps1"
-  );
 }

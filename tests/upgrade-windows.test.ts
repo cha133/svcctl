@@ -4,7 +4,7 @@
  * 关键约束：
  * 1. 仅 Windows（process.platform === "win32"）
  * 2. 用 process.env.USERPROFILE 覆盖 home dir 指向 temp
- * 3. bundled 用真 bin/SvcCtl.exe（PE FileVersion 跟 currentVersion 一致 → up-to-date）
+ * 3. bundled 用当前架构平台包里的真 SvcCtl.exe（PE FileVersion 跟 currentVersion 一致 → up-to-date）
  *
  * v0.4.13 流程简化：
  *   - caller (upgradeCommand) 保证 dest 没锁（supervisor 没跑或刚 stop）
@@ -16,6 +16,7 @@ import { mkdtempSync, rmSync, copyFileSync, mkdirSync, existsSync } from "node:f
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { defaultWindowsSupervisorPath } from "../src/install";
 
 const isWin = process.platform === "win32";
 const describeWin = isWin ? describe : describe.skip;
@@ -42,8 +43,8 @@ describeWin("upgradeWindowsSupervisor", () => {
 
     // 不写 supervisor.pid：supervisorRunning = false（直接 copy 路径）
 
-    // bundled + dest 都用真 bin/SvcCtl.exe（PE FileVersion = currentVersion）
-    realSvcCtl = realpathSync(join(import.meta.dir, "..", "bin", "SvcCtl.exe"));
+    // bundled + dest 都用当前平台包里的真 SvcCtl.exe（PE FileVersion = currentVersion）
+    realSvcCtl = realpathSync(defaultWindowsSupervisorPath());
     bundledPath = join(tempHome, "bundled-SvcCtl.exe");
     copyFileSync(realSvcCtl, bundledPath);
     copyFileSync(realSvcCtl, newDest);

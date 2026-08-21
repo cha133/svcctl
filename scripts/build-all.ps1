@@ -9,7 +9,7 @@
 #
 # 流程：
 #   1. build-icon.ps1     原图 -> launcher/assets/svcctl.ico + 母图备份
-#   2. build-launcher.ps1 cargo build + rcedit set-icon -> bin/svcctl.exe
+#   2. build-launcher.ps1 cargo build (winres embeds icon) -> native npm platform package
 #
 # 要求：
 #   - pwsh 7+（PowerShell Core）—— 跟 build-icon.ps1 / build-launcher.ps1 一样
@@ -34,4 +34,4 @@ if ($LASTEXITCODE -ne 0) { throw "build-launcher failed" }
 
 Write-Host ""
 Write-Host "[build-all] done." -ForegroundColor Green
-Write-Host "  bin/svcctl.exe is up to date with latest source image." -ForegroundColor Green
+Write-Host "  native npm platform package is up to date with the latest source image." -ForegroundColor Green

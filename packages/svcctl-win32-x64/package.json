@@ -1,0 +1,25 @@
+{
+  "name": "svcctl-win32-x64",
+  "version": "0.6.0",
+  "description": "Windows x64 supervisor binary for svcctl",
+  "license": "MIT",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "SvcCtl.exe"
+  ],
+  "exports": {
+    "./SvcCtl.exe": "./SvcCtl.exe"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cha133/svcctl.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,6 +1,6 @@
 {
   "name": "svcctl",
-  "version": "0.5.9",
+  "version": "0.6.0",
   "description": "cross-init: cross-platform system startup supervisor (register any command as a user-level autostart item)",
   "type": "module",
   "bin": {
@@ -12,6 +12,9 @@
     "README.md",
     "LICENSE"
   ],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "bun run src/index.ts",
     "test": "bun test",
@@ -19,6 +22,7 @@
     "verify": "bunx tsc --noEmit && bun test",
     "build:icon": "pwsh -ExecutionPolicy Bypass -File scripts/build-icon.ps1",
     "build:launcher": "pwsh -ExecutionPolicy Bypass -File scripts/build-launcher.ps1",
+    "build:platforms": "pwsh -ExecutionPolicy Bypass -File scripts/build-platforms.ps1",
     "build:all": "pwsh -ExecutionPolicy Bypass -File scripts/build-all.ps1",
     "bump": "pwsh -ExecutionPolicy Bypass -File scripts/bump-version.ps1",
     "release": "pwsh -ExecutionPolicy Bypass -File scripts/publish.ps1"
@@ -48,6 +52,10 @@
     "commander": "^15.0.0",
     "picocolors": "^1.1.1",
     "smol-toml": "^1.6.1"
+  },
+  "optionalDependencies": {
+    "svcctl-win32-arm64": "0.6.0",
+    "svcctl-win32-x64": "0.6.0"
   },
   "devDependencies": {
     "@types/bun": "latest",

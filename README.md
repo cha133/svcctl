@@ -52,14 +52,21 @@ Adding or removing entries **hot-reloads** the supervisor — no restart needed:
 
 ```bash
 bun install
-bun run build:all        # Windows only — regenerate icon + build SvcCtl.exe
+bun run build:launcher   # Windows only — build the native supervisor package
 ```
 
-If you only need to rebuild without changing the icon:
+The JavaScript CLI is published as `svcctl`. Windows supervisor binaries are
+installed on demand from npm optional dependencies:
 
-```bash
-bun run build:launcher   # cargo build only
+```text
+svcctl
+├── svcctl-win32-x64
+└── svcctl-win32-arm64
 ```
+
+Only the package matching `process.platform` and `process.arch` is installed.
+To cross-compile both Windows packages on an x64 Windows machine with the x64
+and ARM64 Visual C++ tools installed, run `bun run build:platforms`.
 
 ## Changing the icon
 
@@ -67,7 +74,7 @@ Source image lives in `launcher/assets/svcctl-source.png` (a backup of whatever 
 
 ```bash
 # Edit the source (1024x1024 RGBA PNG recommended; 球+halo should fill the canvas)
-# Then rebuild icon + exe in one shot:
+# Then rebuild icon + the native supervisor package in one shot:
 bun run build:icon -Source /path/to/your/new-orb.png
 bun run build:launcher
 # or just:
@@ -81,18 +88,54 @@ The icon shows up in Task Manager as `svcctl` (FileDescription) with the new orb
 Versions live in two places that **must stay in sync**: `package.json` (npm CLI) and `launcher/Cargo.toml` (Rust supervisor). Both the VERSIONINFO on the .exe and the npm-published version come from these.
 
 ```bash
-# Bump both + rebuild in one shot:
+# Bump the main package, both platform packages, Cargo.toml, and bun.lock:
 bun run bump 0.4.0
 # or:
 pwsh scripts/bump-version.ps1 0.4.0
 ```
 
-The script validates the semver, updates both files, and calls `build-all.ps1` to rebuild. After it finishes:
+Release binaries are deliberately not built by the bump script; GitHub Actions
+builds them from the tagged commit. After the script finishes:
 
 ```bash
-git diff package.json launcher/Cargo.toml
-git add -A && git commit -m "v0.4.0"
+git diff -- package.json packages launcher/Cargo.toml launcher/Cargo.lock bun.lock
+git add -- package.json packages/svcctl-win32-*/package.json launcher/Cargo.toml launcher/Cargo.lock bun.lock
+git commit -m "v0.4.0"
+git tag v0.4.0
+git push origin main v0.4.0
 ```
+
+## Publishing
+
+`.github/workflows/publish.yml` verifies the tag and synchronized versions,
+builds and checks the x64 and ARM64 PE files, runs the test suite, creates all
+three npm tarballs, and submits unpublished packages with `npm stage publish`.
+Approve the two platform packages first and the `svcctl` main package last.
+
+Publishing uses npm Trusted Publishing (OIDC), so the workflow does not need an
+`NPM_TOKEN`. Configure each npm package with this publisher after it exists:
+
+```text
+Provider: GitHub Actions
+User or organization: cha133
+Repository: svcctl
+Workflow: publish.yml
+Environment: npm-release
+Allowed action: npm stage publish
+```
+
+The two platform package names must be bootstrapped once because npm cannot
+stage or configure Trusted Publishing for a package that does not exist yet.
+For the first release, download the `npm-release-v<version>` artifact produced
+by the workflow and manually publish these two tarballs with 2FA:
+
+```bash
+npm publish svcctl-win32-x64-<version>.tgz --access public
+npm publish svcctl-win32-arm64-<version>.tgz --access public
+```
+
+Then configure Trusted Publishing for both packages and rerun the failed
+workflow. It skips versions already live on npm and stages the main package.
 
 ## License
 

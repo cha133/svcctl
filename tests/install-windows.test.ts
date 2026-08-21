@@ -5,7 +5,7 @@
  * 1. 仅 Windows（process.platform === "win32"）
  * 2. USERPROFILE / HOMEDRIVE 指向空 temp dir（全新 install 模拟）
  * 3. mock 掉 setWindowsRunKey/removeWindowsRunKey——不污染真注册表
- * 4. bundled = 真 bin/SvcCtl.exe（upgrade-windows.test.ts 同款 trick）
+ * 4. bundled = 当前架构平台包里的真 SvcCtl.exe（upgrade-windows.test.ts 同款 trick）
  *
  * 之前 bug：writeFileSync(installedFlagPath(),...) 没建 homedir()/.local/state/svcctl/ 父目录
  *          → fresh box 上 ENOENT。现在 installWindows 在写 flag 前调 ensureStateDir()。
@@ -24,6 +24,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { defaultWindowsSupervisorPath } from "../src/install";
 
 const isWin = process.platform === "win32";
 const describeWin = isWin ? describe : describe.skip;
@@ -48,7 +49,7 @@ describeWin("installWindows — 全新 install 路径", () => {
     process.env.HOMEDRIVE = tempHome[0] + ":";
 
     // 复制真 SvcCtl.exe 作 bundled
-    realSvcCtl = realpathSync(join(import.meta.dir, "..", "bin", "SvcCtl.exe"));
+    realSvcCtl = realpathSync(defaultWindowsSupervisorPath());
     bundledPath = join(tempHome, "bundled-SvcCtl.exe");
     copyFileSync(realSvcCtl, bundledPath);
 

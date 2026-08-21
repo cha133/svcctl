@@ -1,0 +1,149 @@
+name: Publish npm packages
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test-js:
+    name: Test JavaScript (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run verify
+
+  build-windows:
+    name: Build ${{ matrix.arch }}
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-pc-windows-msvc
+            package: svcctl-win32-x64
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
+            package: svcctl-win32-arm64
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        if: matrix.arch == 'x64'
+
+      - name: Install JavaScript dependencies
+        if: matrix.arch == 'x64'
+        run: bun install --frozen-lockfile
+
+      - name: Build supervisor
+        shell: pwsh
+        run: ./scripts/build-launcher.ps1 -Target "${{ matrix.target }}" -NoSync
+
+      - name: Verify JavaScript and tests
+        if: matrix.arch == 'x64'
+        run: bun run verify
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package }}
+          path: packages/${{ matrix.package }}/SvcCtl.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Stage npm release
+    needs:
+      - test-js
+      - build-windows
+    runs-on: ubuntu-24.04
+    environment: npm-release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Use an npm version with staged publishing support
+        run: npm install --global npm@11.19.0
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: svcctl-win32-x64
+          path: packages/svcctl-win32-x64
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: svcctl-win32-arm64
+          path: packages/svcctl-win32-arm64
+
+      - name: Verify release inputs
+        shell: pwsh
+        run: ./scripts/verify-release.ps1 -Tag "${{ github.ref_name }}"
+
+      - name: Create release tarballs
+        shell: bash
+        run: |
+          mkdir release
+          npm pack ./packages/svcctl-win32-x64 --pack-destination release
+          npm pack ./packages/svcctl-win32-arm64 --pack-destination release
+          npm pack . --pack-destination release
+
+      - name: Verify tarball separation
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if tar -tf "release/svcctl-$version.tgz" | grep -Eqi '\.exe$'; then
+            echo "The main svcctl package must not contain a Windows executable" >&2
+            exit 1
+          fi
+          tar -tf "release/svcctl-win32-x64-$version.tgz" | grep -qx 'package/SvcCtl.exe'
+          tar -tf "release/svcctl-win32-arm64-$version.tgz" | grep -qx 'package/SvcCtl.exe'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-release-${{ github.ref_name }}
+          path: release/*.tgz
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Stage unpublished packages on npm
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          stage_if_missing() {
+            local name="$1"
+            local tarball="$2"
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already published; skipping"
+            else
+              npm stage publish "$tarball"
+            fi
+          }
+
+          stage_if_missing svcctl-win32-x64 "release/svcctl-win32-x64-$version.tgz"
+          stage_if_missing svcctl-win32-arm64 "release/svcctl-win32-arm64-$version.tgz"
+          stage_if_missing svcctl "release/svcctl-$version.tgz"
